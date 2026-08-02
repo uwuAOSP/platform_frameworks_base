@@ -43,8 +43,6 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
 import java.security.cert.Certificate;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -63,6 +61,7 @@ public final class AttestationService extends SystemService {
     private static final boolean DEBUG = Log.isLoggable(TAG, Log.DEBUG);
     private static final Boolean sDisableGmsProps =
             SystemProperties.getBoolean("persist.sys.pihooks.disable.gms_props", false);
+    private static final String KEYBOX_ENABLED_PROPERTY = "persist.sys.keybox.enabled";
 
     private final Context mContext;
     private final ScheduledExecutorService mScheduler;
@@ -216,19 +215,17 @@ public final class AttestationService extends SystemService {
             enforcePermission();
             Context userContext = mContext.createContextAsUser(
                     UserHandle.of(UserHandle.getUserId(targetUid)), 0);
-            String excluded = Settings.Secure.getString(
+            String keyboxData = Settings.Secure.getString(
+                    userContext.getContentResolver(), Settings.Secure.KEYBOX_DATA);
+            String excludedPackages = Settings.Secure.getString(
                     userContext.getContentResolver(), Settings.Secure.KEYBOX_EXCLUDED_PACKAGES);
-            if (excluded == null || excluded.isBlank()) {
-                return true;
-            }
-
             String[] packages = mContext.getPackageManager().getPackagesForUid(targetUid);
-            if (packages == null || packages.length == 0) {
-                return true;
-            }
 
-            List<String> excludedPackages = Arrays.asList(excluded.split(":"));
-            return Collections.disjoint(Arrays.asList(packages), excludedPackages);
+            boolean hasImportedKeybox = keyboxData != null && !keyboxData.isBlank();
+            boolean overlayKeyboxEnabled =
+                    SystemProperties.getBoolean(KEYBOX_ENABLED_PROPERTY, false);
+            return KeyboxPolicy.shouldUseKeybox(
+                    hasImportedKeybox, overlayKeyboxEnabled, packages, excludedPackages);
         }
 
         @Override
