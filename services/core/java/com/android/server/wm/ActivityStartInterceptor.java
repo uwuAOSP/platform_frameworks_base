@@ -93,6 +93,8 @@ class ActivityStartInterceptor {
     private static final String EXTRA_APP_JUMP_BYPASS_TOKEN =
             "com.android.server.wm.extra.APP_JUMP_BYPASS_TOKEN";
     private static final String DOCUMENTS_UI_PACKAGE_NAME = "com.android.documentsui";
+    private static final String GOOGLE_DOCUMENTS_UI_PACKAGE_NAME =
+            "com.google.android.documentsui";
     private static final String DOCUMENTS_UI_PICKER_CLASS_PREFIX =
             "com.android.documentsui.picker.";
     private static final String MEDIA_PROVIDER_PACKAGE_NAME = "com.android.providers.media.module";
@@ -467,7 +469,7 @@ class ActivityStartInterceptor {
         return isUserApp(callingAppInfo);
     }
 
-    private static boolean isAllowedSystemMediatorTarget(ActivityInfo activityInfo) {
+    static boolean isAllowedSystemMediatorTarget(ActivityInfo activityInfo) {
         final String packageName = activityInfo.packageName;
         final String className = activityInfo.name;
         if (packageName == null || className == null) {
@@ -486,7 +488,8 @@ class ActivityStartInterceptor {
                 && className.startsWith(PHOTO_PICKER_CLASS_PREFIX)) {
             return true;
         }
-        return DOCUMENTS_UI_PACKAGE_NAME.equals(packageName)
+        return (DOCUMENTS_UI_PACKAGE_NAME.equals(packageName)
+                || GOOGLE_DOCUMENTS_UI_PACKAGE_NAME.equals(packageName))
                 && className.startsWith(DOCUMENTS_UI_PICKER_CLASS_PREFIX);
     }
 

@@ -1079,6 +1079,7 @@ class ActivityStarter {
         final int launchMode = aInfo != null ? aInfo.launchMode : 0;
         if (err == ActivityManager.START_SUCCESS && aInfo != null
                 && (request.componentSpecified || intent.getPackage() != null)
+                && !ActivityStartInterceptor.isAllowedSystemMediatorTarget(aInfo)
                 && mService.getPackageManagerInternalLocked().filterAppAccess(
                         aInfo.packageName, callingUid, userId)) {
             SafeActivityOptions.abort(options);
