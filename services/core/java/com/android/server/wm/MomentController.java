@@ -134,7 +134,12 @@ final class MomentController {
                         || state.isTransformAnimating()) {
                     return;
                 }
-                state.setScale(clampScaleLocked(task, state, mDefaultScale));
+                final DisplayContent displayContent = task.getDisplayContent();
+                final boolean landscape = displayContent != null
+                        && displayContent.getBounds().width() > displayContent.getBounds().height();
+                final float defaultScale = landscape
+                        ? Math.min(mDefaultScale, LANDSCAPE_DEFAULT_SCALE) : mDefaultScale;
+                state.setScale(clampScaleLocked(task, state, defaultScale));
                 constrainMomentPositionLocked(task, state);
                 updateHandleWindowLocked(task);
                 scheduleMomentSurfaceUpdateLocked(task);
@@ -750,8 +755,15 @@ final class MomentController {
         if (displayContent != null && displayContent.getBounds().width()
                 > displayContent.getBounds().height()) {
             final int taskWidth = Math.max(1, taskBounds.width());
+            final int taskHeight = Math.max(1, taskBounds.height());
+            final float density = getDensityLocked(task);
+            final float availableHeight = safeBounds.height()
+                    - HANDLE_AREA_HEIGHT_DP * density
+                    - MomentGeometry.getBottomHandleHeight(taskWidth, density);
+            final float maxWidthScale = (float) safeBounds.width() / taskWidth;
+            final float maxHeightScale = availableHeight / taskHeight;
             return Math.max(MIN_SCALE,
-                    Math.min(MAX_SCALE, (float) safeBounds.width() / taskWidth));
+                    Math.min(MAX_SCALE, Math.min(maxWidthScale, maxHeightScale)));
         }
         final int taskHeight = Math.max(1, taskBounds.height());
         final float density = getDensityLocked(task);

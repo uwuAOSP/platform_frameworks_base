@@ -591,20 +591,6 @@ final class MomentTaskSurfaceState {
 
         mContentCrop.set(0, 0, mBaseBounds.width(), mBaseBounds.height());
         mFullscreenBounds.set(displayBounds);
-        if (displayContent != null) {
-            final DisplayFrames portraitDisplayFrames = getPortraitDisplayFrames();
-            final InsetsState insetsState = portraitDisplayFrames != null
-                    ? portraitDisplayFrames.mInsetsState
-                    : displayContent.getInsetsStateController().getRawInsetsState();
-            final Rect displayFrame = insetsState.getDisplayFrame();
-            final Insets systemBarInsets = insetsState.calculateInsets(displayFrame, displayFrame,
-                    systemBars(), true /* ignoreVisibility */);
-            mContentCrop.inset(systemBarInsets.left, systemBarInsets.top,
-                    systemBarInsets.right, systemBarInsets.bottom);
-            if (mContentCrop.isEmpty()) {
-                mContentCrop.set(0, 0, mBaseBounds.width(), mBaseBounds.height());
-            }
-        }
 
         final int width = Math.round(mContentCrop.width() * mScale);
         final int height = Math.round(mContentCrop.height() * mScale);
