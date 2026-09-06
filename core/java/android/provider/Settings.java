@@ -13524,6 +13524,9 @@ public final class Settings {
         /** @hide */
         public static final int UWU_APP_BACKGROUND_MODE_FULL = 2;
 
+        /** @hide */
+        public static final int UWU_APP_BACKGROUND_MODE_AUTO = 3;
+
         /**
          * Per-user JSON map from package name to app background mode.
          *
@@ -14878,6 +14881,27 @@ public final class Settings {
          * The content:// style URL for global secure settings items.  Not public.
          */
         public static final Uri CONTENT_URI = Uri.parse("content://" + AUTHORITY + "/global");
+
+        /** @hide */
+        public static final int UWU_APP_BACKGROUND_FREEZER_BACKEND_AUTO = 0;
+
+        /** @hide */
+        public static final int UWU_APP_BACKGROUND_FREEZER_BACKEND_CGROUP1 = 1;
+
+        /** @hide */
+        public static final int UWU_APP_BACKGROUND_FREEZER_BACKEND_CGROUP2 = 2;
+
+        /** @hide */
+        public static final int UWU_APP_BACKGROUND_FREEZER_BACKEND_HYBRID = 3;
+
+        /**
+         * Preferred freezer hierarchy for uwuAOSP app background management.
+         *
+         * @hide
+         */
+        @Readable
+        public static final String UWU_APP_BACKGROUND_FREEZER_BACKEND =
+                "uwu_app_background_freezer_backend";
 
         /**
          * Whether the notification bubbles are globally enabled
