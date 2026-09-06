@@ -19,6 +19,9 @@ package com.android.server.wm;
 import android.annotation.NonNull;
 import android.content.Context;
 import android.os.SystemProperties;
+import android.os.UserHandle;
+import android.provider.Settings;
+import android.view.Display;
 import android.window.DesktopModeFlags;
 
 import com.android.internal.R;
@@ -98,9 +101,31 @@ public final class DesktopModeHelper {
      * Return {@code true} if desktop mode can be entered on the current device.
      */
     public static boolean canEnterDesktopMode(@NonNull Context context) {
+        if (isExternalDesktopModeEnabled(context)) {
+            return DesktopModeFlags.ENABLE_DESKTOP_WINDOWING_MODE.isTrue();
+        }
         return (isDeviceEligibleForDesktopMode(context)
                 && DesktopModeFlags.ENABLE_DESKTOP_WINDOWING_MODE.isTrue())
                 || isDesktopModeEnabledByDevOption(context);
+    }
+
+    public static boolean isExternalDesktopModeEnabled(@NonNull Context context) {
+        return Settings.Secure.getIntForUser(context.getContentResolver(),
+                Settings.Secure.UWU_EXTERNAL_DESKTOP_ENABLED, 0, UserHandle.USER_CURRENT) != 0;
+    }
+
+    public static boolean isScrcpyVirtualDisplayAllowed(@NonNull Context context) {
+        return Settings.Secure.getIntForUser(context.getContentResolver(),
+                Settings.Secure.UWU_EXTERNAL_DESKTOP_ALLOW_SCRCPY_VIRTUAL_DISPLAY, 1,
+                UserHandle.USER_CURRENT) != 0;
+    }
+
+    /** Returns whether the display is the virtual display created for screen recording. */
+    public static boolean isMediaProjectionDisplay(@NonNull Display display) {
+        return display.getType() == Display.TYPE_VIRTUAL
+                && "com.android.systemui".equals(display.getOwnerPackageName())
+                && display.getUniqueId() != null
+                && display.getUniqueId().contains(",Recording Display,");
     }
 
     /** Returns {@code true} if desktop experience wallpaper is supported on this device. */

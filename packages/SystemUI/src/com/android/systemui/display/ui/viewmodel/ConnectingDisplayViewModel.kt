@@ -18,6 +18,7 @@ package com.android.systemui.display.ui.viewmodel
 import android.app.Dialog
 import android.content.Context
 import android.os.SystemProperties
+import android.provider.Settings
 import android.provider.Settings.Secure.MIRROR_BUILT_IN_DISPLAY
 import android.util.Log
 import android.view.Display.DEFAULT_DISPLAY
@@ -52,6 +53,7 @@ import com.android.systemui.statusbar.phone.SystemUIDialogFactory
 import com.android.systemui.statusbar.phone.createBottomSheet
 import com.android.systemui.statusbar.policy.AccessibilityManagerWrapper
 import com.android.systemui.util.settings.SecureSettings
+import com.android.systemui.util.settings.SettingsProxyExt.observerFlow
 import com.android.wm.shell.shared.desktopmode.DesktopState
 import dagger.Binds
 import dagger.Module
@@ -66,7 +68,9 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.withContext
 
 /**
@@ -94,6 +98,7 @@ constructor(
 
     private var dialog: Dialog? = null
     private val connectedDisplays = mutableSetOf<Int>()
+    private val projectionDisplays = mutableSetOf<Int>()
 
     /** Starts listening for pending displays. */
     @OptIn(FlowPreview::class)
@@ -103,11 +108,21 @@ constructor(
         val kioskModeFlow = kioskModeRepository.isInKioskMode
         val concurrentDisplaysInProgressFlow =
             connectedDisplayInteractor.concurrentDisplaysInProgress
+        val externalDesktopEnabledFlow =
+            secureSettings
+                .observerFlow(Settings.Secure.UWU_EXTERNAL_DESKTOP_ENABLED)
+                .onStart { emit(Unit) }
+                .map { isUwuExternalDesktopEnabled() }
 
         // Listen for display disconnect events and send an a11y event when necessary
         disconnectFlow
             .debounce(200.milliseconds)
-            .onEach { if (connectedDisplays.remove(it)) handleA11y(isConnected = false) }
+            .onEach {
+                if (connectedDisplays.remove(it)) handleA11y(isConnected = false)
+                if (projectionDisplays.remove(it) && projectionDisplays.isEmpty()) {
+                    restoreExternalDesktopProjection()
+                }
+            }
             .launchIn(scope)
 
         // Let's debounce for 2 reasons:
@@ -117,10 +132,13 @@ constructor(
         //   connected while on the lockscreen).
         val debouncedPendingDisplayFlow = pendingDisplayFlow.debounce(200.milliseconds)
 
-        combine(debouncedPendingDisplayFlow, kioskModeFlow, concurrentDisplaysInProgressFlow) {
-                pendingDisplay,
-                isInKioskMode,
-                concurrentDisplaysInProgress ->
+        combine(
+                debouncedPendingDisplayFlow,
+                kioskModeFlow,
+                concurrentDisplaysInProgressFlow,
+                externalDesktopEnabledFlow,
+            ) { pendingDisplay, isInKioskMode, concurrentDisplaysInProgress, externalDesktopEnabled
+                ->
                 if (pendingDisplay == null) {
                     dismissDialog()
                 } else {
@@ -128,7 +146,17 @@ constructor(
                         pendingDisplay,
                         isInKioskMode,
                         concurrentDisplaysInProgress,
+                        externalDesktopEnabled,
                     )
+                }
+            }
+            .launchIn(scope)
+
+        externalDesktopEnabledFlow
+            .onEach { enabled ->
+                if (!enabled) {
+                    projectionDisplays.clear()
+                    restoreExternalDesktopProjection()
                 }
             }
             .launchIn(scope)
@@ -205,6 +233,7 @@ constructor(
         pendingDisplay: PendingDisplay,
         isInKioskMode: Boolean,
         concurrentDisplaysInProgress: Boolean,
+        externalDesktopEnabled: Boolean,
     ) {
         val isInExtendedMode = desktopState.isDesktopModeSupportedOnDisplay(DEFAULT_DISPLAY)
 
@@ -219,6 +248,10 @@ constructor(
                     isInKioskMode = true,
                     isDesktopModeSupported = desktopState.canEnterDesktopMode,
                 )
+            }
+            externalDesktopEnabled -> {
+                pendingDisplay.enableForExternalDesktopProjection()
+                handleA11y(isConnected = true)
             }
             isInExtendedMode -> {
                 pendingDisplay.enableForDesktop()
@@ -244,6 +277,34 @@ constructor(
 
     private suspend fun PendingDisplay.enableForDesktop() =
         withContext(bgDispatcher) { applyConnectionChoice(enableMirroring = false) }
+
+    private suspend fun PendingDisplay.enableForExternalDesktopProjection() {
+        withContext(bgDispatcher) {
+            val saved = secureSettings.getInt(
+                Settings.Secure.UWU_EXTERNAL_DESKTOP_MIRROR_PREVIOUS,
+                -1,
+            )
+            if (saved == -1) {
+                val current = secureSettings.getInt(MIRROR_BUILT_IN_DISPLAY, 0)
+                secureSettings.putInt(
+                    Settings.Secure.UWU_EXTERNAL_DESKTOP_MIRROR_PREVIOUS,
+                    current,
+                )
+                current
+            } else {
+                saved
+            }
+        }
+        if (!setDisplayMirrorSetting(enable = true)) {
+            ignore()
+            return
+        }
+        enable()
+        withContext(coroutineContext) {
+            connectedDisplays.add(id)
+            projectionDisplays.add(id)
+        }
+    }
 
     private suspend fun PendingDisplay.enableForMirroring() =
         withContext(bgDispatcher) { applyConnectionChoice(enableMirroring = true) }
@@ -283,6 +344,24 @@ constructor(
             if (currentVal == newVal) return@withContext true
             return@withContext secureSettings.putInt(MIRROR_BUILT_IN_DISPLAY, newVal)
         }
+
+    private fun restoreExternalDesktopProjection() {
+        scope.launch(context = bgDispatcher) {
+            val previous = secureSettings.getInt(
+                Settings.Secure.UWU_EXTERNAL_DESKTOP_MIRROR_PREVIOUS,
+                -1,
+            )
+            if (previous == -1) return@launch
+            val current = secureSettings.getInt(MIRROR_BUILT_IN_DISPLAY, 0)
+            if (current == 1) {
+                secureSettings.putInt(MIRROR_BUILT_IN_DISPLAY, previous)
+            }
+            secureSettings.putInt(Settings.Secure.UWU_EXTERNAL_DESKTOP_MIRROR_PREVIOUS, -1)
+        }
+    }
+
+    private fun isUwuExternalDesktopEnabled() =
+        secureSettings.getInt(Settings.Secure.UWU_EXTERNAL_DESKTOP_ENABLED, 0) != 0
 
     private fun dismissDialog() {
         dialog?.dismiss()
