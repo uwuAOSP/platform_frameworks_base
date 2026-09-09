@@ -44,12 +44,13 @@ public class AppBackgroundModeConfigTest {
     @Test
     public void parse_dropsMalformedAndDisallowedEntries() {
         final AppBackgroundModeConfig.ParseResult result = AppBackgroundModeConfig.parse(
-                "{\"allowed\":1,\"default\":0,\"invalid\":7,\"blocked\":2}",
+                "{\"allowed\":1,\"aosp\":0,\"invalid\":7,\"blocked\":2}",
                 packageName -> !packageName.equals("blocked"));
 
         assertThat(result.modes).containsExactly(
-                "allowed", AppBackgroundModeConfig.MODE_TOMBSTONE);
-        assertThat(result.normalized).isEqualTo("{\"allowed\":1}");
+                "allowed", AppBackgroundModeConfig.MODE_TOMBSTONE,
+                "aosp", AppBackgroundModeConfig.MODE_DEFAULT).inOrder();
+        assertThat(result.normalized).isEqualTo("{\"aosp\":0,\"allowed\":1}");
         assertThat(result.changed).isTrue();
     }
 
@@ -87,6 +88,24 @@ public class AppBackgroundModeConfigTest {
                 AppBackgroundModeConfig.MODE_TOMBSTONE,
                 AppBackgroundModeConfig.MODE_AUTO)).isEqualTo(
                 AppBackgroundModeConfig.MODE_TOMBSTONE);
+    }
+
+    @Test
+    public void sanitizeDefaultMode_acceptsOnlyExplicitModes() {
+        assertThat(AppBackgroundModeConfig.sanitizeDefaultMode(
+                AppBackgroundModeConfig.MODE_DEFAULT)).isEqualTo(
+                AppBackgroundModeConfig.MODE_DEFAULT);
+        assertThat(AppBackgroundModeConfig.sanitizeDefaultMode(
+                AppBackgroundModeConfig.MODE_TOMBSTONE)).isEqualTo(
+                AppBackgroundModeConfig.MODE_TOMBSTONE);
+        assertThat(AppBackgroundModeConfig.sanitizeDefaultMode(
+                AppBackgroundModeConfig.MODE_FULL)).isEqualTo(
+                AppBackgroundModeConfig.MODE_FULL);
+        assertThat(AppBackgroundModeConfig.sanitizeDefaultMode(
+                AppBackgroundModeConfig.MODE_AUTO)).isEqualTo(
+                AppBackgroundModeConfig.MODE_DEFAULT);
+        assertThat(AppBackgroundModeConfig.sanitizeDefaultMode(7)).isEqualTo(
+                AppBackgroundModeConfig.MODE_DEFAULT);
     }
 
     @Test

@@ -13545,6 +13545,18 @@ public final class Settings {
                 "uwu_app_background_ignore_task_removal";
 
         /**
+         * The app background mode applied to apps without an explicit per-app mode.
+         * Values are 0 for the original AOSP behavior (also used when unset or invalid),
+         * 1 for tombstone mode and 2 for Full mode.
+         * <p>Type: int
+         *
+         * @hide
+         */
+        @Readable
+        public static final String UWU_APP_BACKGROUND_DEFAULT_MODE =
+                "uwu_app_background_default_mode";
+
+        /**
          * Navigation bar mode.
          *  0 = 3 button
          *  1 = 2 button

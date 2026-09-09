@@ -81,6 +81,7 @@ final class AppBackgroundModeController {
     private final Object mLock = new Object();
     private final SparseArray<ArrayMap<String, Integer>> mModesByUser = new SparseArray<>();
     private final SparseBooleanArray mIgnoreTaskRemovalByUser = new SparseBooleanArray();
+    private final SparseIntArray mDefaultModeByUser = new SparseIntArray();
     private final SparseIntArray mEffectiveUidModes = new SparseIntArray();
 
     // All fields below are accessed on mHandler, except where explicitly synchronized.
@@ -146,6 +147,9 @@ final class AppBackgroundModeController {
         };
         resolver.registerContentObserver(
                 Settings.Secure.getUriFor(Settings.Secure.UWU_APP_BACKGROUND_MODES),
+                false, settingsObserver, UserHandle.USER_ALL);
+        resolver.registerContentObserver(
+                Settings.Secure.getUriFor(Settings.Secure.UWU_APP_BACKGROUND_DEFAULT_MODE),
                 false, settingsObserver, UserHandle.USER_ALL);
         resolver.registerContentObserver(
                 Settings.Secure.getUriFor(
@@ -249,14 +253,21 @@ final class AppBackgroundModeController {
             return AppBackgroundModeConfig.shouldIgnoreTaskRemoval(
                     mIgnoreTaskRemovalByUser.get(
                             UserHandle.getUserId(applicationUid), false),
-                    mEffectiveUidModes.get(
-                            applicationUid, AppBackgroundModeConfig.MODE_DEFAULT));
+                    mEffectiveUidModes.get(applicationUid,
+                            defaultModeForUser(UserHandle.getUserId(applicationUid))));
         }
     }
 
     private int getUidMode(int uid) {
         synchronized (mLock) {
-            return mEffectiveUidModes.get(uid, AppBackgroundModeConfig.MODE_DEFAULT);
+            return mEffectiveUidModes.get(uid,
+                    defaultModeForUser(UserHandle.getUserId(uid)));
+        }
+    }
+
+    private int defaultModeForUser(int userId) {
+        synchronized (mLock) {
+            return mDefaultModeByUser.get(userId, AppBackgroundModeConfig.MODE_DEFAULT);
         }
     }
 
@@ -408,6 +419,7 @@ final class AppBackgroundModeController {
                 synchronized (mLock) {
                     mModesByUser.remove(userId);
                     mIgnoreTaskRemovalByUser.delete(userId);
+                    mDefaultModeByUser.delete(userId);
                 }
                 rebuildEffectiveModes();
                 return;
@@ -448,9 +460,17 @@ final class AppBackgroundModeController {
                 Settings.Secure.UWU_APP_BACKGROUND_IGNORE_TASK_REMOVAL, 0, userId) != 0;
         final AppBackgroundModeConfig.ParseResult parsed = AppBackgroundModeConfig.parse(value,
                 packageName -> isConfigurablePackage(packageName, userId, criticalPackages));
+        final int defaultMode = AppBackgroundModeConfig.sanitizeDefaultMode(
+                Settings.Secure.getIntForUser(mContext.getContentResolver(),
+                        Settings.Secure.UWU_APP_BACKGROUND_DEFAULT_MODE,
+                        AppBackgroundModeConfig.MODE_DEFAULT, userId));
+        final int previousDefaultMode;
         synchronized (mLock) {
+            previousDefaultMode = mDefaultModeByUser.get(userId,
+                    AppBackgroundModeConfig.MODE_DEFAULT);
             mModesByUser.put(userId, parsed.modes);
             mIgnoreTaskRemovalByUser.put(userId, ignoreTaskRemoval);
+            mDefaultModeByUser.put(userId, defaultMode);
         }
         if (parsed.changed) {
             Settings.Secure.putStringForUser(mContext.getContentResolver(),
@@ -464,6 +484,9 @@ final class AppBackgroundModeController {
         }
         if (rebuild) {
             rebuildEffectiveModes();
+            if (previousDefaultMode != defaultMode) {
+                applyDefaultModeChange(userId, previousDefaultMode, defaultMode);
+            }
         }
     }
 
@@ -491,9 +514,7 @@ final class AppBackgroundModeController {
         for (int i = 0; i < candidateUids.size(); i++) {
             final int uid = candidateUids.valueAt(i);
             final int mode = resolveUidMode(uid);
-            if (mode != AppBackgroundModeConfig.MODE_DEFAULT) {
-                next.put(uid, mode);
-            }
+            next.put(uid, mode);
             if (mode == AppBackgroundModeConfig.MODE_FULL) {
                 fullAppIds.add(UserHandle.getAppId(uid));
                 final String[] packages = mPackageManager.getPackagesForUid(uid);
@@ -514,21 +535,22 @@ final class AppBackgroundModeController {
     }
 
     private int resolveUidMode(int uid) {
+        final int userId = UserHandle.getUserId(uid);
+        final int defaultMode = defaultModeForUser(userId);
         final String[] packages = mPackageManager.getPackagesForUid(uid);
         if (packages == null || packages.length == 0) {
-            return AppBackgroundModeConfig.MODE_DEFAULT;
+            return defaultMode;
         }
-        final int userId = UserHandle.getUserId(uid);
         final ArrayMap<String, Integer> userModes;
         synchronized (mLock) {
             userModes = mModesByUser.get(userId);
             if (userModes == null) {
-                return AppBackgroundModeConfig.MODE_DEFAULT;
+                return defaultMode;
             }
         }
         final int[] modes = new int[packages.length];
         for (int i = 0; i < packages.length; i++) {
-            modes[i] = userModes.getOrDefault(packages[i], AppBackgroundModeConfig.MODE_DEFAULT);
+            modes[i] = userModes.getOrDefault(packages[i], defaultMode);
         }
         return AppBackgroundModeConfig.resolveUidMode(modes);
     }
@@ -559,13 +581,13 @@ final class AppBackgroundModeController {
         final ArraySet<Integer> changed = new ArraySet<>();
         for (int i = 0; i < previous.size(); i++) {
             final int uid = previous.keyAt(i);
-            if (previous.valueAt(i) != next.get(uid, AppBackgroundModeConfig.MODE_DEFAULT)) {
+            if (previous.valueAt(i) != effectiveMode(next, uid)) {
                 changed.add(uid);
             }
         }
         for (int i = 0; i < next.size(); i++) {
             final int uid = next.keyAt(i);
-            if (next.valueAt(i) != previous.get(uid, AppBackgroundModeConfig.MODE_DEFAULT)) {
+            if (next.valueAt(i) != effectiveMode(previous, uid)) {
                 changed.add(uid);
             }
         }
@@ -578,34 +600,88 @@ final class AppBackgroundModeController {
             synchronized (mService.mProcLock) {
                 for (int i = 0; i < changed.size(); i++) {
                     final int uid = changed.valueAt(i);
-                    final int previousMode = previous.get(
-                            uid, AppBackgroundModeConfig.MODE_DEFAULT);
-                    final int nextMode = next.get(uid, AppBackgroundModeConfig.MODE_DEFAULT);
-                    final int previousBackend = getFreezerBackendForMode(previousMode);
-                    final int nextBackend = getFreezerBackendForMode(nextMode);
-                    if (nextBackend != AppBackgroundModeConfig.FREEZER_BACKEND_NONE) {
-                        if (previousBackend != AppBackgroundModeConfig.FREEZER_BACKEND_NONE
-                                && previousBackend != nextBackend) {
-                            mService.getCachedAppOptimizer()
-                                    .markTombstoneThawRecoveryForUidLSP(uid);
-                            unfreezeUidLSP(uid, "app mode changed freezer backend");
-                        }
-                        scheduleFreeze(uid, AppBackgroundModeConfig.FREEZE_DELAY_MS,
-                                "mode changed");
-                    } else {
-                        cancelFreeze(uid);
-                        cancelBinderProtectionTimeout(uid);
-                        if (previousBackend != AppBackgroundModeConfig.FREEZER_BACKEND_NONE) {
-                            mService.getCachedAppOptimizer()
-                                    .markTombstoneThawRecoveryForUidLSP(uid);
-                        }
-                        unfreezeUidLSP(uid, "mode changed");
-                        if (!isBinderRecoveryPending(uid)) {
-                            synchronized (mStateLock) {
-                                mBinderProtectedUids.remove(uid);
-                            }
+                    applyUidModeChange(uid, effectiveMode(previous, uid),
+                            effectiveMode(next, uid));
+                }
+            }
+        }
+    }
+
+    /**
+     * Applies mode transitions to running apps that don't have an explicit per-app mode after
+     * the user-configured default background mode changed.
+     */
+    private void applyDefaultModeChange(int userId, int previousDefault, int newDefault) {
+        if (previousDefault == newDefault) {
+            return;
+        }
+        final ArraySet<Integer> unconfiguredRunningUids = new ArraySet<>();
+        synchronized (mService) {
+            synchronized (mService.mProcLock) {
+                mService.mProcessList.forEachLruProcessesLOSP(false, process -> {
+                    final int uid = process.getApplicationUid();
+                    if (!UserHandle.isApp(uid)
+                            || UserHandle.getUserId(uid) != userId
+                            || process.isPersistent()) {
+                        return;
+                    }
+                    synchronized (mLock) {
+                        if (mEffectiveUidModes.indexOfKey(uid) >= 0) {
+                            return;
                         }
                     }
+                    unconfiguredRunningUids.add(uid);
+                });
+                if (unconfiguredRunningUids.isEmpty()) {
+                    return;
+                }
+                mService.updateOomAdjLocked(OOM_ADJ_REASON_RESTRICTION_CHANGE);
+                for (int i = 0; i < unconfiguredRunningUids.size(); i++) {
+                    final int uid = unconfiguredRunningUids.valueAt(i);
+                    applyUidModeChange(uid, previousDefault, newDefault);
+                }
+            }
+        }
+        logInfo("Applied default background mode user=" + userId
+                + " mode=" + newDefault + " uidCount=" + unconfiguredRunningUids.size());
+    }
+
+    private int effectiveMode(SparseIntArray modes, int uid) {
+        final int explicit = modes.get(uid, AppBackgroundModeConfig.MODE_DEFAULT);
+        if (explicit != AppBackgroundModeConfig.MODE_DEFAULT
+                || modes.indexOfKey(uid) >= 0) {
+            return explicit;
+        }
+        return defaultModeForUser(UserHandle.getUserId(uid));
+    }
+
+    /** The caller must hold mService and mService.mProcLock. */
+    private void applyUidModeChange(int uid, int previousMode, int nextMode) {
+        if (previousMode == nextMode) {
+            return;
+        }
+        final int previousBackend = getFreezerBackendForMode(previousMode);
+        final int nextBackend = getFreezerBackendForMode(nextMode);
+        if (nextBackend != AppBackgroundModeConfig.FREEZER_BACKEND_NONE) {
+            if (previousBackend != AppBackgroundModeConfig.FREEZER_BACKEND_NONE
+                    && previousBackend != nextBackend) {
+                mService.getCachedAppOptimizer()
+                        .markTombstoneThawRecoveryForUidLSP(uid);
+                unfreezeUidLSP(uid, "app mode changed freezer backend");
+            }
+            scheduleFreeze(uid, AppBackgroundModeConfig.FREEZE_DELAY_MS,
+                    "mode changed");
+        } else {
+            cancelFreeze(uid);
+            cancelBinderProtectionTimeout(uid);
+            if (previousBackend != AppBackgroundModeConfig.FREEZER_BACKEND_NONE) {
+                mService.getCachedAppOptimizer()
+                        .markTombstoneThawRecoveryForUidLSP(uid);
+            }
+            unfreezeUidLSP(uid, "mode changed");
+            if (!isBinderRecoveryPending(uid)) {
+                synchronized (mStateLock) {
+                    mBinderProtectedUids.remove(uid);
                 }
             }
         }

@@ -86,8 +86,8 @@ final class AppBackgroundModeConfig {
                         mode = MODE_TOMBSTONE;
                         malformed = true;
                     }
-                    if ((mode == MODE_TOMBSTONE || mode == MODE_FULL || mode == MODE_AUTO)
-                            && packageAllowed.test(packageName)) {
+                    if ((mode == MODE_DEFAULT || mode == MODE_TOMBSTONE
+                            || mode == MODE_FULL) && packageAllowed.test(packageName)) {
                         sorted.put(packageName, mode);
                     } else {
                         malformed = true;
@@ -139,6 +139,17 @@ final class AppBackgroundModeConfig {
     @VisibleForTesting
     static boolean shouldIgnoreTaskRemoval(boolean enabled, int mode) {
         return enabled && (mode == MODE_TOMBSTONE || mode == MODE_FULL || mode == MODE_AUTO);
+    }
+
+    /**
+     * Clamps a user-configured default mode to a valid mode value. MODE_DEFAULT (0) means the
+     * original AOSP behavior; MODE_AUTO is not selectable as the default.
+     */
+    static int sanitizeDefaultMode(int value) {
+        if (value == MODE_TOMBSTONE || value == MODE_FULL) {
+            return value;
+        }
+        return MODE_DEFAULT;
     }
 
     @VisibleForTesting
