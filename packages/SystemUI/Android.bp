@@ -418,6 +418,7 @@ android_library {
         "SystemUISharedLib",
         "SystemUICustomizationLib",
         "SettingsLib",
+        "uwuSystemUITranslations",
         "WindowManager-Shell",
         "androidx.leanback_leanback",
         "androidx.slice_slice-core",
