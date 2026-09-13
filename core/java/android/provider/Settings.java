@@ -13489,6 +13489,52 @@ public final class Settings {
         /** @hide */
         public static final int UWU_APP_SENSOR_POLICY_DENY_ALWAYS = 2;
 
+        /**
+         * Per-user JSON map from package name to uwuAOSP clipboard access policy.
+         * Allow-policy entries are omitted.
+         *
+         * @hide
+         */
+        @Readable
+        public static final String UWU_APP_CLIPBOARD_POLICIES =
+                "uwu_app_clipboard_policies";
+
+        /**
+         * Per-user JSON map for clipboard read policies.
+         *
+         * @hide
+         */
+        @Readable
+        public static final String UWU_APP_CLIPBOARD_READ_POLICIES =
+                "uwu_app_clipboard_read_policies";
+
+        /**
+         * Per-user JSON map for clipboard write policies.
+         *
+         * @hide
+         */
+        @Readable
+        public static final String UWU_APP_CLIPBOARD_WRITE_POLICIES =
+                "uwu_app_clipboard_write_policies";
+
+        /**
+         * Whether clipboard policy prompts are enabled.
+         *
+         * @hide
+         */
+        @Readable
+        public static final String UWU_APP_CLIPBOARD_PROMPTS_ENABLED =
+                "uwu_app_clipboard_prompts_enabled";
+
+        /** @hide */
+        public static final int UWU_APP_CLIPBOARD_POLICY_ALLOW = 0;
+
+        /** @hide */
+        public static final int UWU_APP_CLIPBOARD_POLICY_ASK = 1;
+
+        /** @hide */
+        public static final int UWU_APP_CLIPBOARD_POLICY_DENY = 2;
+
         /** @hide */
         public static final int UWU_APP_BACKGROUND_MODE_DEFAULT = 0;
 
