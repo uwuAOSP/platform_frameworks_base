@@ -21,7 +21,9 @@ import android.content.Context;
 import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.provider.Settings;
+import android.util.DisplayMetrics;
 import android.view.Display;
+import android.view.Surface;
 import android.window.DesktopModeFlags;
 
 import com.android.internal.R;
@@ -32,6 +34,8 @@ import com.android.window.flags.Flags;
  * Constants for desktop mode feature
  */
 public final class DesktopModeHelper {
+
+    private static final int PROJECTED_DESKTOP_SMALLEST_WIDTH_DP = 720;
 
     /**
      * Flag to indicate whether to restrict desktop mode to supported devices.
@@ -126,6 +130,23 @@ public final class DesktopModeHelper {
                 && "com.android.systemui".equals(display.getOwnerPackageName())
                 && display.getUniqueId() != null
                 && display.getUniqueId().contains(",Recording Display,");
+    }
+
+    @VisibleForTesting
+    static int getProjectedDesktopDensity(int width, int height, int densityDpi) {
+        if (width <= 0 || height <= 0 || densityDpi <= 0) {
+            return densityDpi;
+        }
+        final int desktopDensity = Math.max(DisplayMetrics.DENSITY_LOW,
+                Math.min(width, height) * DisplayMetrics.DENSITY_DEFAULT
+                        / PROJECTED_DESKTOP_SMALLEST_WIDTH_DP);
+        return Math.min(densityDpi, desktopDensity);
+    }
+
+    @VisibleForTesting
+    @Surface.Rotation
+    static int getProjectedDesktopRotation(int width, int height) {
+        return width < height ? Surface.ROTATION_90 : Surface.ROTATION_0;
     }
 
     /** Returns {@code true} if desktop experience wallpaper is supported on this device. */
