@@ -140,6 +140,7 @@ constructor(
             isAppVisible = appVisibility.isAppCurrentlyVisible,
             lastAppVisibleTime = appVisibility.lastAppVisibleTime,
             instanceId = instanceId,
+            isTextOnlyChip = this.isTextOnlyChip,
         )
     }
 

@@ -81,6 +81,8 @@ sealed class OngoingActivityChipModel {
         val colors: ColorsModel,
         /** Data class that determines how clicks on the chip should be handled. */
         val clickBehavior: ClickBehavior,
+        /** Called after a long press when the chip supports dismissal. */
+        val onLongPress: (() -> Unit)? = null,
         override val transitionManager: TransitionManager? = null,
         /**
          * Whether this chip should be hidden. This can be the case depending on system states (like

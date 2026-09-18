@@ -56,6 +56,7 @@ import java.io.PrintWriter
 import java.lang.Math.max
 import java.util.concurrent.CopyOnWriteArraySet
 import javax.inject.Inject
+import kotlin.math.abs
 
 /**
  * Encapsulates logic that can solve for the left/right insets required for the status bar contents.
@@ -90,6 +91,9 @@ interface StatusBarContentInsetsProvider :
      * bar area is contiguous.
      */
     fun currentRotationHasCornerCutout(): Boolean
+
+    /** Returns the current display cutout category without relying on a device identifier. */
+    fun currentRotationCutoutType(): StatusBarCutoutType
 
     /**
      * Calculates the maximum bounding rectangle for the privacy chip animation + ongoing privacy
@@ -134,6 +138,14 @@ interface StatusBarContentInsetsProvider :
     fun getStatusBarContentAreaForCurrentRotation(): Rect
 
     fun getStatusBarPaddingTop(@Rotation rotation: Int? = null): Int
+}
+
+enum class StatusBarCutoutType {
+    NONE,
+    TOP_CENTER,
+    TOP_CORNER,
+    SIDE,
+    UNKNOWN,
 }
 
 @PerDisplaySingleton
@@ -218,13 +230,39 @@ constructor(
     }
 
     override fun currentRotationHasCornerCutout(): Boolean {
-        val cutout = checkNotNull(context.display).cutout ?: return false
-        val topBounds = cutout.boundingRectTop
+        return currentRotationCutoutType() == StatusBarCutoutType.TOP_CORNER
+    }
 
+    override fun currentRotationCutoutType(): StatusBarCutoutType {
+        val display = context.display ?: return StatusBarCutoutType.NONE
+        val cutout = display.cutout ?: return StatusBarCutoutType.NONE
         val point = Point()
-        checkNotNull(context.display).getRealSize(point)
+        display.getRealSize(point)
 
-        return topBounds.left <= 0 || topBounds.right >= point.x
+        val topBounds = cutout.boundingRectTop
+        if (!topBounds.isEmpty) {
+            if (topBounds.left <= 0 || topBounds.right >= point.x) {
+                return StatusBarCutoutType.TOP_CORNER
+            }
+            if (abs(topBounds.centerX() - point.x / 2) <= point.x / 4) {
+                return StatusBarCutoutType.TOP_CENTER
+            }
+            return StatusBarCutoutType.UNKNOWN
+        }
+
+        if (
+            !cutout.boundingRectLeft.isEmpty ||
+                !cutout.boundingRectRight.isEmpty ||
+                !cutout.boundingRectBottom.isEmpty
+        ) {
+            return StatusBarCutoutType.SIDE
+        }
+
+        return if (cutout.safeInsets != Insets.NONE) {
+            StatusBarCutoutType.UNKNOWN
+        } else {
+            StatusBarCutoutType.NONE
+        }
     }
 
     override fun getBoundingRectForPrivacyChipForRotation(

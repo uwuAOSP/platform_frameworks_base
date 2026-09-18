@@ -18,21 +18,25 @@ package com.android.systemui.statusbar.chips.notification.domain.interactor
 
 import android.annotation.SuppressLint
 import android.app.Flags
+import android.service.notification.NotificationListenerService.REASON_CANCEL
 import com.android.app.tracing.coroutines.launchTraced as launch
 import com.android.systemui.CoreStartable
 import com.android.systemui.dagger.SysUISingleton
 import com.android.systemui.dagger.qualifiers.Background
+import com.android.systemui.dagger.qualifiers.Main
 import com.android.systemui.log.LogBuffer
 import com.android.systemui.log.core.Logger
 import com.android.systemui.statusbar.chips.StatusBarChipLogTags.pad
 import com.android.systemui.statusbar.chips.StatusBarChipsLog
 import com.android.systemui.statusbar.chips.notification.domain.model.NotificationChipModel
+import com.android.systemui.statusbar.notification.collection.notifcollection.CommonNotifCollection
 import com.android.systemui.statusbar.notification.domain.interactor.ActiveNotificationsInteractor
 import com.android.systemui.statusbar.notification.domain.interactor.ActiveNotificationsInteractor.Companion.isOngoingCallNotification
+import com.android.systemui.statusbar.notification.row.OnUserInteractionCallback
 import com.android.systemui.util.kotlin.pairwise
 import com.android.systemui.util.time.SystemClock
 import javax.inject.Inject
-import kotlin.math.max
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -47,6 +51,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.withContext
+import kotlin.math.max
 
 /** An interactor for the notification chips shown in the status bar. */
 @SysUISingleton
@@ -57,6 +63,9 @@ constructor(
     private val systemClock: SystemClock,
     private val activeNotificationsInteractor: ActiveNotificationsInteractor,
     private val singleNotificationChipInteractorFactory: SingleNotificationChipInteractor.Factory,
+    private val commonNotifCollection: CommonNotifCollection,
+    private val onUserInteractionCallback: OnUserInteractionCallback,
+    @Main private val mainDispatcher: CoroutineDispatcher,
     @StatusBarChipsLog private val logBuffer: LogBuffer,
 ) : CoreStartable {
     private val logger = Logger(logBuffer, "AllNotifs".pad())
@@ -76,6 +85,14 @@ constructor(
 
     suspend fun onPromotedNotificationChipTapped(key: String) {
         _promotedNotificationChipTapEvent.emit(key)
+    }
+
+    suspend fun dismissNotification(key: String) {
+        withContext(mainDispatcher) {
+            commonNotifCollection.getEntry(key)?.let { entry ->
+                onUserInteractionCallback.registerFutureDismissal(entry, REASON_CANCEL).run()
+            }
+        }
     }
 
     /**

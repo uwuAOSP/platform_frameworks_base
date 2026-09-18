@@ -45,4 +45,6 @@ data class NotificationChipModel(
     val instanceId: InstanceId?,
     /** Notification claims to represent the app's active screenshare */
     val isScreenShareNotification: Boolean,
+    /** True if the notification requests a text-only status bar chip. */
+    val isTextOnlyChip: Boolean = false,
 )

@@ -109,6 +109,8 @@ data class ActiveNotificationModel(
     val isScreenShareNotification: Boolean,
     /** The visual style of the notification, containing additional data relevant to that style. */
     val style: NotifStyle?,
+    /** True if the notification requests a text-only status bar chip. */
+    val isTextOnlyChip: Boolean = false,
 ) : ActiveNotificationEntryModel() {
     companion object {
         private const val TAG = "ActiveNotificationEntryModel"

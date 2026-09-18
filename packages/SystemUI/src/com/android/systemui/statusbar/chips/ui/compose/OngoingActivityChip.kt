@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.dimensionResource
@@ -52,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.android.compose.animation.Expandable
 import com.android.compose.modifiers.thenIf
+import com.android.systemui.communal.ui.compose.extensions.detectLongPressGesture
 import com.android.systemui.animation.Expandable
 import com.android.systemui.common.ui.compose.Icon
 import com.android.systemui.common.ui.compose.load
@@ -122,6 +124,11 @@ fun OngoingActivityChip(
                     }
                     if (model.content is OngoingActivityChipModel.Content.Countdown) {
                         liveRegion = LiveRegionMode.Assertive
+                    }
+                }
+                .thenIf(model.onLongPress != null) {
+                    Modifier.pointerInput(model.key) {
+                        detectLongPressGesture { model.onLongPress?.invoke() }
                     }
                 }
                 .widthIn(min = minWidth)

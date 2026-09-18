@@ -81,6 +81,8 @@ constructor(
     companion object {
         @VisibleForTesting
         const val IS_SCREEN_SHARE_NOTIFICATION = "android.isScreenShareLiveUpdate"
+
+        const val IS_TEXT_ONLY_CHIP = "org.uwuaosp.prism.extra.TEXT_ONLY_CHIP"
     }
 }
 
@@ -224,6 +226,7 @@ private class ActiveNotificationsStoreBuilder(
             requestedPromotion = sbn.notification.isRequestPromotedOngoing,
             isScreenShareNotification = sbn.notification.isScreenShareNotification(),
             notifStyle = notifStyle(sbn.notification),
+            isTextOnlyChip = sbn.notification.extras.getBoolean(IS_TEXT_ONLY_CHIP),
         )
     }
 }
@@ -259,6 +262,7 @@ private fun ActiveNotificationsStore.createOrReuseNotif(
     promotedContent: PromotedNotificationContentModels?,
     requestedPromotion: Boolean,
     isScreenShareNotification: Boolean,
+    isTextOnlyChip: Boolean,
     notifStyle: NotifStyle?,
 ): ActiveNotificationModel {
     return individuals[key]?.takeIf {
@@ -289,6 +293,7 @@ private fun ActiveNotificationsStore.createOrReuseNotif(
             promotedContent = promotedContent,
             requestedPromotion = requestedPromotion,
             isScreenShareNotification = isScreenShareNotification,
+            isTextOnlyChip = isTextOnlyChip,
             style = notifStyle,
         )
     }
@@ -319,6 +324,7 @@ private fun ActiveNotificationsStore.createOrReuseNotif(
             promotedContent = promotedContent,
             requestedPromotion = requestedPromotion,
             isScreenShareNotification = isScreenShareNotification,
+            isTextOnlyChip = isTextOnlyChip,
             style = notifStyle,
         )
 }
@@ -350,6 +356,7 @@ private fun ActiveNotificationModel.isCurrent(
     promotedContent: PromotedNotificationContentModels?,
     requestedPromotion: Boolean,
     isScreenShareNotification: Boolean,
+    isTextOnlyChip: Boolean,
     style: NotifStyle?,
 ): Boolean {
     return when {
@@ -381,6 +388,7 @@ private fun ActiveNotificationModel.isCurrent(
         promotedContent != this.promotedContent -> false
         requestedPromotion != this.requestedPromotion -> false
         isScreenShareNotification != this.isScreenShareNotification -> false
+        isTextOnlyChip != this.isTextOnlyChip -> false
         style != this.style -> false
         else -> true
     }

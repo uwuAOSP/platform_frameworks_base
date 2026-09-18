@@ -58,12 +58,16 @@ import com.android.systemui.util.kotlin.pairwise
 import com.android.systemui.util.time.SystemClock
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.update
 
 /** A view model for status bar chips for promoted ongoing notifications. */
 @SysUISingleton
@@ -102,6 +106,10 @@ constructor(
     private val transitionControllerFactories: MutableMap<String, ComposableControllerFactory> =
         mutableMapOf()
 
+    private val expandedTextOnlyChipKeys = MutableStateFlow<Set<String>>(emptySet())
+    private val hiddenTextOnlyChipKeys = MutableStateFlow<Set<String>>(emptySet())
+    private val knownTextOnlyChipKeys = mutableSetOf<String>()
+
     /**
      * A flow that prunes the incoming [NotificationChipModel] instances to just the information
      * each status bar chip needs.
@@ -125,7 +133,35 @@ constructor(
 
                 currentChips.filterByPackage().map { it.toPrunedModel() }
             }
+            .onEach(::updateTextOnlyChipLifecycle)
             .distinctUntilChanged()
+
+    private fun updateTextOnlyChipLifecycle(chips: List<PrunedNotificationChipModel>) {
+        val currentKeys = chips.filter { it.isTextOnlyChip }.mapTo(mutableSetOf()) { it.key }
+        val newKeys = currentKeys - knownTextOnlyChipKeys
+        knownTextOnlyChipKeys.retainAll(currentKeys)
+        knownTextOnlyChipKeys.addAll(currentKeys)
+        expandedTextOnlyChipKeys.update { it.intersect(currentKeys) }
+        hiddenTextOnlyChipKeys.update { it.intersect(currentKeys) }
+
+        newKeys.forEach { key ->
+            expandTextOnlyChip(key, TEXT_ONLY_CHIP_INITIAL_EXPANSION_MILLIS)
+        }
+    }
+
+    private fun expandTextOnlyChip(key: String, durationMillis: Long = TEXT_ONLY_CHIP_CLICK_EXPANSION_MILLIS) {
+        expandedTextOnlyChipKeys.update { it + key }
+        applicationScope.launch {
+            delay(durationMillis)
+            expandedTextOnlyChipKeys.update { it - key }
+        }
+    }
+
+    private fun hideTextOnlyChip(key: String) {
+        expandedTextOnlyChipKeys.update { it - key }
+        hiddenTextOnlyChipKeys.update { it + key }
+        applicationScope.launch { notifChipsInteractor.dismissNotification(key) }
+    }
 
     /**
      * Filters all the chips down to just the most important chip per package so we don't show
@@ -217,6 +253,7 @@ constructor(
             isAppVisible = isAppVisible,
             instanceId = instanceId,
             isScreenShareNotification = isScreenShareNotification,
+            isTextOnlyChip = isTextOnlyChip,
         )
     }
 
@@ -286,7 +323,9 @@ constructor(
                     notificationChipsWithPrunedContent,
                     transitionStates,
                     headsUpNotificationInteractor.statusBarHeadsUpState,
-                ) { notifications, transitionStates, headsUpState ->
+                    expandedTextOnlyChipKeys,
+                    hiddenTextOnlyChipKeys,
+                ) { notifications, transitionStates, headsUpState, expandedKeys, hiddenKeys ->
                     val oldChips = latestChips
                     val newChips = mutableMapOf<String, TransitionAwareChipModel>()
                     val oldTransitionStates = latestTransitionStates
@@ -312,7 +351,13 @@ constructor(
                                     newTransitionState =
                                         transitionStates[it.key] ?: TransitionState.NoTransition,
                                 )
-                            it.toActivityChipModel(headsUpState, transitionAwareChip, isHidden)
+                            it.toActivityChipModel(
+                                headsUpState,
+                                transitionAwareChip,
+                                isHidden,
+                                it.key in expandedKeys,
+                                it.key in hiddenKeys,
+                            )
                         }
 
                     latestChips = newChips
@@ -325,11 +370,19 @@ constructor(
 
     private val chipsWithoutReturnAnimations: Flow<List<OngoingActivityChipModel.Active>> =
         if (!StatusBarChipsReturnAnimations.isEnabled) {
-            combine(
-                    notificationChipsWithPrunedContent,
-                    headsUpNotificationInteractor.statusBarHeadsUpState,
-                ) { notifications, headsUpState ->
-                    notifications.map { it.toActivityChipModel(headsUpState) }
+                combine(
+                        notificationChipsWithPrunedContent,
+                        headsUpNotificationInteractor.statusBarHeadsUpState,
+                        expandedTextOnlyChipKeys,
+                        hiddenTextOnlyChipKeys,
+                ) { notifications, headsUpState, expandedKeys, hiddenKeys ->
+                    notifications.map {
+                        it.toActivityChipModel(
+                            headsUpState,
+                            isTextOnlyChipExpanded = it.key in expandedKeys,
+                            isTextOnlyChipHidden = it.key in hiddenKeys,
+                        )
+                    }
                 }
                 .distinctUntilChanged()
         } else {
@@ -352,15 +405,21 @@ constructor(
         headsUpState: TopPinnedState,
         transitionAwareChip: TransitionAwareChipModel? = null,
         isHidden: Boolean? = null,
+        isTextOnlyChipExpanded: Boolean = false,
+        isTextOnlyChipHidden: Boolean = false,
     ): OngoingActivityChipModel.Active {
         val contentDescription = getContentDescription(this.appName)
         // Note: ResolvedBasicCompactContent has an option for SOURCE_APP_ICON, but it's not used by
         // AOSP and not choosable by apps. So for now we only behave as if it's SOURCE_SMALL_ICON.
         val icon =
-            OngoingActivityChipModel.ChipIcon.StatusBarNotificationIcon(
-                this.key,
-                contentDescription,
-            )
+            if (isTextOnlyChip) {
+                null
+            } else {
+                OngoingActivityChipModel.ChipIcon.StatusBarNotificationIcon(
+                    this.key,
+                    contentDescription,
+                )
+            }
 
         val colors =
             if (NotificationChipFromCompactContent.isEnabled && this.semanticStyle != null) {
@@ -372,20 +431,36 @@ constructor(
         // If the app that posted this notification is visible, we want to hide the chip
         // because information between the status bar chip and the app itself could be
         // out-of-sync (like a timer that's slightly off)
-        val isHidden = isHidden ?: this.isAppVisible
+        val shouldHideForVisibility = isHidden ?: this.isAppVisible
+        val isChipHidden = isTextOnlyChipHidden || shouldHideForVisibility
 
         val isShowingHeadsUpFromChipTap = headsUpState.isShowingHeadsUpFromChipTap(this.key)
         val clickBehavior =
-            createNotificationToggleClickBehavior(
-                applicationScope = applicationScope,
-                notifChipsInteractor = notifChipsInteractor,
-                logger = logger,
-                notificationKey = this.key,
-                isShowingHeadsUpFromChipTap = isShowingHeadsUpFromChipTap,
-            )
+            if (isTextOnlyChip) {
+                OngoingActivityChipModel.ClickBehavior.ExpandAction {
+                    expandTextOnlyChip(key)
+                }
+            } else {
+                createNotificationToggleClickBehavior(
+                    applicationScope = applicationScope,
+                    notifChipsInteractor = notifChipsInteractor,
+                    logger = logger,
+                    notificationKey = this.key,
+                    isShowingHeadsUpFromChipTap = isShowingHeadsUpFromChipTap,
+                )
+            }
 
         val content: OngoingActivityChipModel.Content =
             when {
+                isTextOnlyChip ->
+                    OngoingActivityChipModel.Content.Text(
+                        text =
+                            if (isTextOnlyChipExpanded) {
+                                textVariants?.firstOrNull() ?: appName
+                            } else {
+                                "\u2039"
+                            }
+                    )
                 isShowingHeadsUpFromChipTap -> {
                     // If the user tapped this chip to show the HUN, we want to just show the icon
                     // because the HUN will show the rest of the information.
@@ -459,7 +534,8 @@ constructor(
             content = content,
             colors = colors,
             clickBehavior = clickBehavior,
-            isHidden = isHidden,
+            onLongPress = if (isTextOnlyChip) ({ hideTextOnlyChip(key) }) else null,
+            isHidden = isChipHidden,
             transitionManager = transitionManager,
             instanceId = instanceId,
             isScreenShareNotification = isScreenShareNotification,
@@ -512,6 +588,7 @@ constructor(
         val isAppVisible: Boolean,
         val instanceId: InstanceId?,
         val isScreenShareNotification: Boolean,
+        val isTextOnlyChip: Boolean,
     )
 
     companion object {
@@ -520,6 +597,8 @@ constructor(
          * status bar chip to show the time.
          */
         private const val FUTURE_TIME_THRESHOLD_MILLIS = 60 * 1000
+        private const val TEXT_ONLY_CHIP_INITIAL_EXPANSION_MILLIS = 2_000L
+        private const val TEXT_ONLY_CHIP_CLICK_EXPANSION_MILLIS = 5_000L
 
         /**
          * Builds a deterministic transition cookie for a notification chip from its package and app
