@@ -213,6 +213,8 @@ interface HomeStatusBarViewModel : Activatable {
     val isLyricEnabled: Flow<Boolean>
     val isLyricClockRightMode: Flow<Boolean>
     val isLyricTranslationEnabled: Flow<Boolean>
+    val isLyricWordTimingEnabled: Flow<Boolean>
+        get() = flowOf(true)
     val isLyricClockRightHideIcon: Flow<Boolean>
 
     /**
@@ -621,13 +623,18 @@ constructor(
     override val isLyricClockRightMode: Flow<Boolean> =
         secureSettingsRepository
             .intSetting(Settings.Secure.STATUS_BAR_LYRIC_POSITION, 0)
-            .map { it == com.android.systemui.statusbar.phone.LyricViewController.LYRIC_POSITION_CLOCK_RIGHT }
+            .map { it == org.uwuaosp.systemui.lyric.LyricViewController.LYRIC_POSITION_CLOCK_RIGHT }
             .distinctUntilChanged()
             .flowOn(bgDispatcher)
 
     override val isLyricTranslationEnabled: Flow<Boolean> =
         secureSettingsRepository
             .boolSetting(Settings.Secure.STATUS_BAR_LYRIC_SHOW_TRANSLATION, false)
+            .flowOn(bgDispatcher)
+
+    override val isLyricWordTimingEnabled: Flow<Boolean> =
+        secureSettingsRepository
+            .boolSetting(Settings.Secure.STATUS_BAR_LYRIC_WORD_TIMING, true)
             .flowOn(bgDispatcher)
 
     override val isLyricClockRightHideIcon: Flow<Boolean> =
