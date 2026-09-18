@@ -14736,6 +14736,19 @@ public final class Settings {
                 "status_bar_lyric_show_translation";
 
         /**
+         * Controls whether word-timed lyrics are requested when available.
+         * <ul>
+         *    <li> 0 = use line-timed lyrics only </li>
+         *    <li> 1 = prefer word-timed lyrics and fall back to line timing </li>
+         * </ul>
+         *
+         * @hide
+         */
+        @Readable
+        public static final String STATUS_BAR_LYRIC_WORD_TIMING =
+                "status_bar_lyric_word_timing";
+
+        /**
          * Controls whether the music app icon is hidden in clock-right lyric mode.
          * <ul>
          *    <li> 0 = show icon </li>
@@ -14749,14 +14762,16 @@ public final class Settings {
                 "status_bar_lyric_hide_icon_clock_right";
 
         /**
-         * Semicolon-separated package names allowed to provide status bar lyrics.
-         * An empty value denies all packages.
+         * Semicolon-separated HTTPS base URLs for custom lyric sources. Each source must provide
+         * GET /v1/lyrics?title=&artist=&album=&durationMs=&sourcePackage=&mediaId= and return
+         * the standard lyric payload. GET /v2/lyrics with the same parameters is optional and may
+         * return YRC word timing. An empty value uses the default remote source followed by the
+         * built-in lyric provider fallback.
          *
          * @hide
          */
         @Readable
-        public static final String STATUS_BAR_LYRIC_ALLOWED_PACKAGES =
-                "status_bar_lyric_allowed_packages";
+        public static final String STATUS_BAR_LYRIC_SOURCES = "status_bar_lyric_sources";
 
         /**
          * Whether connected external displays use the system desktop experience.
