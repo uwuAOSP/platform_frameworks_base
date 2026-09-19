@@ -13000,6 +13000,27 @@ public final class Settings {
         @Readable(maxTargetSdk = VERSION_CODES.TIRAMISU)
         public static final String QS_TILES = "sysui_qs_tiles";
 
+        /** Quick Settings visual style. @hide */
+        public static final String QS_UI_STYLE = "qs_ui_style";
+
+        /** uwuQS visual style. @hide */
+        public static final int QS_UI_STYLE_UWU = 0;
+
+        /** Default Quick Settings visual style. @hide */
+        public static final int QS_UI_STYLE_DEFAULT = 1;
+
+        /** Internal version for Quick Settings visual style migrations. @hide */
+        public static final String QS_VISUAL_STYLE_MIGRATION_VERSION =
+                "qs_visual_style_migration_version";
+
+        /** Whether uwuQS uses the platform shade transparency and blur treatment. @hide */
+        public static final String UWU_QS_TRANSPARENCY_ENABLED =
+                "uwu_qs_transparency_enabled";
+
+        /** Whether the brightness slider is shown in collapsed Quick Settings. @hide */
+        public static final String QS_SHOW_COLLAPSED_BRIGHTNESS =
+                "qs_show_collapsed_brightness";
+
         /**
          * Whether this user has enabled Quick controls.
          *
@@ -13424,6 +13445,15 @@ public final class Settings {
          * @hide
          */
         public static final String NAVIGATIONBAR_KEY_ORDER = "navigationbar_key_order";
+
+        /**
+         * Whether the navigation bar hint (pill) should be displayed.
+         * <p>Type: int (0 for false, 1 for true)
+         *
+         * @hide
+         */
+        @Readable
+        public static final String NAVIGATION_BAR_HINT = "navigation_bar_hint";
 
         /**
          * Whether Moment, including its launch and gesture entry points, is enabled.
@@ -14359,6 +14389,16 @@ public final class Settings {
          */
         public static final String LAUNCHER_TASKBAR_EDUCATION_SHOWING =
                 "launcher_taskbar_education_showing";
+
+        /**
+         * Whether themed icons are shown in the all-apps drawer.
+         * <p>Type: int (0 for false, 1 for true)
+         *
+         * @hide
+         */
+        @Readable
+        public static final String LAUNCHER_ALLAPPS_THEMED_ICONS =
+                "launcher_allapps_themed_icons";
 
         /**
          * Whether any Compat UI Education is currently showing.
