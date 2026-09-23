@@ -77,6 +77,31 @@ public abstract class LyricViewController implements DarkIconDispatcher.DarkRece
     private final UserTracker mUserTracker;
     private static volatile LyricViewController sDebugController;
 
+    private MediaController mCurrentMediaController;
+    private LyricSource.Lyrics mCurrentLyrics;
+    private String mCurrentTrackKey;
+    private String mRetryTrackKey;
+    private Future<?> mPendingFetch;
+    private long mFetchGeneration;
+    private int mFetchRetryCount;
+    private LyricSource.Lyrics mDebugLyrics;
+    private long mDebugStartElapsedRealtime;
+    private boolean mEnabled;
+    private boolean mStarted;
+    private boolean mShowOnClockRight;
+    private boolean mShowTranslation;
+    private volatile boolean mWordTimingEnabled = true;
+    private boolean mHideIconOnClockRight;
+    private boolean mTemporarilyHidden;
+    private boolean mSessionListenerRegistered;
+    private boolean mSourcesObserverRegistered;
+    private boolean mDestroyed;
+
+    private int mOverlayTintColor = DarkIconDispatcher.DEFAULT_ICON_TINT;
+    private int mInlineTintColor = DarkIconDispatcher.DEFAULT_ICON_TINT;
+    private CharSequence mCurrentLyricText;
+    private CharSequence mCurrentTranslatedText;
+
     private final MediaSessionManager.OnActiveSessionsChangedListener mSessionsChangedListener =
             this::onActiveSessionsChanged;
     private final MediaController.Callback mMediaCallback = new MediaController.Callback() {
@@ -100,13 +125,15 @@ public abstract class LyricViewController implements DarkIconDispatcher.DarkRece
             refreshActiveSessions();
         }
     };
-    private final Runnable mPositionUpdateRunnable = () -> {
+    private final Runnable mPositionUpdateRunnable = this::updatePosition;
+
+    private void updatePosition() {
         updateDisplayedLyric();
         if (mDebugLyrics != null || (mEnabled && mCurrentMediaController != null
                 && isPlaybackActive(mCurrentMediaController.getPlaybackState()))) {
             mHandler.postDelayed(mPositionUpdateRunnable, POSITION_UPDATE_INTERVAL_MS);
         }
-    };
+    }
     private final Runnable mRetryFetchRunnable = () -> {
         if (!mEnabled || mCurrentMediaController == null) {
             return;
@@ -146,31 +173,6 @@ public abstract class LyricViewController implements DarkIconDispatcher.DarkRece
             refreshActiveSessions();
         }
     };
-
-    private MediaController mCurrentMediaController;
-    private LyricSource.Lyrics mCurrentLyrics;
-    private String mCurrentTrackKey;
-    private String mRetryTrackKey;
-    private Future<?> mPendingFetch;
-    private long mFetchGeneration;
-    private int mFetchRetryCount;
-    private LyricSource.Lyrics mDebugLyrics;
-    private long mDebugStartElapsedRealtime;
-    private boolean mEnabled;
-    private boolean mStarted;
-    private boolean mShowOnClockRight;
-    private boolean mShowTranslation;
-    private volatile boolean mWordTimingEnabled = true;
-    private boolean mHideIconOnClockRight;
-    private boolean mTemporarilyHidden;
-    private boolean mSessionListenerRegistered;
-    private boolean mSourcesObserverRegistered;
-    private boolean mDestroyed;
-
-    private int mOverlayTintColor = DarkIconDispatcher.DEFAULT_ICON_TINT;
-    private int mInlineTintColor = DarkIconDispatcher.DEFAULT_ICON_TINT;
-    private CharSequence mCurrentLyricText;
-    private CharSequence mCurrentTranslatedText;
 
     public LyricViewController(Context context, View statusBar, View tintReferenceView) {
         mContext = context;
