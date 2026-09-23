@@ -27,4 +27,6 @@ interface ISelectionToolbarRenderServiceCallback {
     oneway void transferTouch(in IBinder source, in IBinder target);
 
     void onPasteAction(int uid);
+
+    void onCopyAction(int uid);
 }

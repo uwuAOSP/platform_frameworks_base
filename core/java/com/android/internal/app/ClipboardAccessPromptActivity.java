@@ -3,6 +3,15 @@
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package com.android.internal.app;
@@ -16,27 +25,33 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageItemInfo;
 import android.content.pm.PackageManager;
-import android.graphics.drawable.Drawable;
+import android.content.res.ColorStateList;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.os.Bundle;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.provider.Settings;
 import android.util.Log;
-import android.view.View;
+import android.view.Gravity;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import com.android.internal.R;
 
-import java.util.ArrayList;
-
-/** Dialog shown when an app with ask-policy accesses the clipboard. */
-public class ClipboardAccessPromptActivity extends Activity implements View.OnClickListener {
+/** Bottom sheet shown when an app with ask-policy accesses the clipboard. */
+public class ClipboardAccessPromptActivity extends Activity {
     private static final String TAG = "ClipboardAccessPrompt";
     private static final String PACKAGE_NAME = "com.android.internal.app";
 
@@ -63,8 +78,7 @@ public class ClipboardAccessPromptActivity extends Activity implements View.OnCl
         mUserId = intent.getIntExtra(Intent.EXTRA_USER_ID, -1);
         mPackageName = intent.getStringExtra(EXTRA_PACKAGE_NAME);
         mOperation = intent.getIntExtra(EXTRA_OPERATION, -1);
-        if (mUserId < 0
-                || mPackageName == null
+        if (mUserId < 0 || mPackageName == null
                 || (mOperation != OPERATION_READ && mOperation != OPERATION_WRITE)) {
             Log.wtf(TAG, "Invalid clipboard access prompt intent: " + intent);
             mPromptResolved = true;
@@ -72,67 +86,116 @@ public class ClipboardAccessPromptActivity extends Activity implements View.OnCl
             return;
         }
 
-        setContentView(R.layout.app_jump_prompt_dialog);
-        bindViews();
+        setContentView(createSheet());
+        final Window window = getWindow();
+        window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        window.setGravity(Gravity.BOTTOM);
+        window.setLayout(WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.WRAP_CONTENT);
+        window.setDimAmount(0.32f);
+        window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        window.setWindowAnimations(R.style.AutofillHalfScreenAnimation);
     }
 
-    private void bindViews() {
-        final TextView titleView = requireViewById(R.id.app_jump_title);
-        final TextView messageView = requireViewById(R.id.app_jump_message);
-        final ImageView sourceIconView = requireViewById(R.id.app_jump_source_icon);
-        final TextView sourceLabelView = requireViewById(R.id.app_jump_source_label);
-        final Button allowButton = requireViewById(R.id.app_jump_allow_button);
-        final Button denyButton = requireViewById(R.id.app_jump_deny_button);
-        final Button allowOnceButton = requireViewById(R.id.app_jump_allow_once_button);
-        final Button okButton = requireViewById(R.id.app_jump_ok_button);
-        mPermanentRuleView = requireViewById(R.id.app_jump_remember_choice);
-        final TextView footerView = requireViewById(R.id.app_jump_footer);
-        final ViewGroup buttonGroup = requireViewById(R.id.app_jump_button_group);
+    private FrameLayout createSheet() {
+        final FrameLayout root = new FrameLayout(this);
+        root.setPadding(dp(16), 0, dp(16), dp(16));
 
-        final CharSequence appLabel = loadAppLabel();
-        sourceIconView.setImageDrawable(loadAppIcon());
-        sourceLabelView.setText(appLabel);
-        final ViewGroup sourceContainer = (ViewGroup) sourceIconView.getParent();
-        final ViewGroup routeContainer = (ViewGroup) sourceContainer.getParent();
-        for (int index = 0; index < routeContainer.getChildCount(); index++) {
-            final View child = routeContainer.getChildAt(index);
-            child.setVisibility(child == sourceContainer ? View.VISIBLE : View.GONE);
-        }
+        final LinearLayout sheet = new LinearLayout(this);
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        sheet.setPadding(dp(24), dp(24), dp(24), dp(24));
+        sheet.setBackground(roundedBackground(R.color.materialColorSurfaceContainerLow, 28));
+        final int width = Math.min(getResources().getDisplayMetrics().widthPixels - dp(32),
+                dp(560));
+        root.addView(sheet, new FrameLayout.LayoutParams(
+                width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
+
+        final FrameLayout iconContainer = new FrameLayout(this);
+        iconContainer.setBackground(roundedBackground(R.color.materialColorPrimaryContainer, 18));
+        final LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(56), dp(56));
+        iconParams.bottomMargin = dp(20);
+        sheet.addView(iconContainer, iconParams);
+        final ImageView icon = new ImageView(this);
+        icon.setImageResource(R.drawable.ic_clipboard_access_hand);
+        icon.setImageTintList(ColorStateList.valueOf(
+                getColor(R.color.materialColorOnPrimaryContainer)));
+        iconContainer.addView(icon, new FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER));
 
         final boolean isRead = mOperation == OPERATION_READ;
-        titleView.setText(
-                isRead
-                        ? R.string.clipboard_access_prompt_read_title
-                        : R.string.clipboard_access_prompt_write_title);
-        messageView.setText(
-                getString(
-                        isRead
-                                ? R.string.clipboard_access_prompt_read_message
-                                : R.string.clipboard_access_prompt_write_message,
-                        appLabel));
+        final TextView title = new TextView(this);
+        title.setText(isRead ? R.string.clipboard_access_prompt_read_title
+                : R.string.clipboard_access_prompt_write_title);
+        title.setTextColor(getColor(R.color.materialColorOnSurface));
+        title.setTextSize(24);
+        title.setTypeface(Typeface.create("google-sans", Typeface.NORMAL));
+        sheet.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        allowButton.setText(R.string.app_jump_allow);
-        denyButton.setText(R.string.app_jump_deny);
-        allowButton.setVisibility(View.VISIBLE);
-        denyButton.setVisibility(View.VISIBLE);
-        allowOnceButton.setVisibility(View.GONE);
-        okButton.setVisibility(View.GONE);
+        final TextView message = new TextView(this);
+        message.setText(getString(isRead ? R.string.clipboard_access_prompt_read_message
+                : R.string.clipboard_access_prompt_write_message, loadAppLabel()));
+        message.setTextColor(getColor(R.color.materialColorOnSurfaceVariant));
+        message.setTextSize(16);
+        final LinearLayout.LayoutParams messageParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        messageParams.topMargin = dp(12);
+        sheet.addView(message, messageParams);
+
+        mPermanentRuleView = new CheckBox(this);
         mPermanentRuleView.setText(R.string.clipboard_access_write_permanent_rule);
         mPermanentRuleView.setChecked(false);
-        mPermanentRuleView.setVisibility(View.VISIBLE);
-        footerView.setVisibility(View.GONE);
-        updateActionButtonBackgrounds(buttonGroup, allowButton, denyButton);
+        mPermanentRuleView.setTextColor(getColor(R.color.materialColorOnSurface));
+        final LinearLayout.LayoutParams checkParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        checkParams.topMargin = dp(16);
+        sheet.addView(mPermanentRuleView, checkParams);
 
-        allowButton.setOnClickListener(this);
-        denyButton.setOnClickListener(this);
+        final LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        final LinearLayout.LayoutParams actionsParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        actionsParams.topMargin = dp(20);
+        sheet.addView(actions, actionsParams);
+        final Button deny = createActionButton(R.string.app_jump_deny,
+                R.color.materialColorPrimary, R.color.materialColorOnPrimary);
+        final Button allow = createActionButton(R.string.app_jump_allow,
+                R.color.materialColorSecondaryContainer,
+                R.color.materialColorOnSecondaryContainer);
+        final LinearLayout.LayoutParams denyParams = new LinearLayout.LayoutParams(0, dp(56), 1);
+        denyParams.setMarginEnd(dp(8));
+        actions.addView(deny, denyParams);
+        final LinearLayout.LayoutParams allowParams = new LinearLayout.LayoutParams(0, dp(56), 1);
+        allowParams.setMarginStart(dp(8));
+        actions.addView(allow, allowParams);
+        deny.setOnClickListener(view -> applyDecision(Settings.Secure.UWU_APP_CLIPBOARD_POLICY_DENY));
+        allow.setOnClickListener(view -> applyDecision(Settings.Secure.UWU_APP_CLIPBOARD_POLICY_ALLOW));
+        return root;
     }
 
-    @Override
-    public void onClick(View view) {
-        final int decision =
-                view.getId() == R.id.app_jump_allow_button
-                        ? Settings.Secure.UWU_APP_CLIPBOARD_POLICY_ALLOW
-                        : Settings.Secure.UWU_APP_CLIPBOARD_POLICY_DENY;
+    private Button createActionButton(int text, int backgroundColor, int textColor) {
+        final Button button = new Button(this);
+        button.setText(text);
+        button.setAllCaps(false);
+        button.setTextColor(getColor(textColor));
+        button.setTextSize(16);
+        button.setBackground(new RippleDrawable(
+                ColorStateList.valueOf(getColor(R.color.materialColorControlHighlight)),
+                roundedBackground(backgroundColor, 28), null));
+        return button;
+    }
+
+    private GradientDrawable roundedBackground(int color, int radiusDp) {
+        final GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(getColor(color));
+        drawable.setCornerRadius(dp(radiusDp));
+        return drawable;
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private void applyDecision(int decision) {
         if (!resolvePrompt(decision, mPermanentRuleView.isChecked())) {
             Log.e(TAG, "Unable to apply clipboard choice for " + mPackageName);
             Toast.makeText(this, R.string.clipboard_access_policy_save_failed, Toast.LENGTH_LONG)
@@ -167,35 +230,6 @@ public class ClipboardAccessPromptActivity extends Activity implements View.OnCl
         super.onDestroy();
     }
 
-    private void updateActionButtonBackgrounds(ViewGroup buttonGroup, Button... buttons) {
-        final ArrayList<Button> visibleButtons = new ArrayList<>();
-        for (Button button : buttons) {
-            if (button.getVisibility() == View.VISIBLE) {
-                visibleButtons.add(button);
-            }
-        }
-        buttonGroup.setVisibility(visibleButtons.isEmpty() ? View.GONE : View.VISIBLE);
-        final int topMargin =
-                getResources().getDimensionPixelOffset(R.dimen.app_jump_action_button_margin_top);
-        final int bottomMargin =
-                getResources()
-                        .getDimensionPixelOffset(R.dimen.app_jump_action_button_margin_bottom);
-        for (int index = 0; index < visibleButtons.size(); index++) {
-            final Button button = visibleButtons.get(index);
-            button.setBackgroundResource(
-                    index == 0
-                            ? R.drawable.app_jump_action_background_top
-                            : R.drawable.app_jump_action_background_bottom);
-            final ViewGroup.LayoutParams layoutParams = button.getLayoutParams();
-            if (layoutParams instanceof ViewGroup.MarginLayoutParams marginLayoutParams) {
-                marginLayoutParams.topMargin = index == 0 ? 0 : topMargin;
-                marginLayoutParams.bottomMargin =
-                        index == visibleButtons.size() - 1 ? bottomMargin : 0;
-                button.setLayoutParams(marginLayoutParams);
-            }
-        }
-    }
-
     private CharSequence loadAppLabel() {
         try {
             final ApplicationInfo appInfo =
@@ -207,16 +241,6 @@ public class ClipboardAccessPromptActivity extends Activity implements View.OnCl
                             | PackageItemInfo.SAFE_LABEL_FLAG_TRIM);
         } catch (PackageManager.NameNotFoundException e) {
             return mPackageName;
-        }
-    }
-
-    private Drawable loadAppIcon() {
-        try {
-            return getPackageManager()
-                    .getApplicationInfoAsUser(mPackageName, 0, mUserId)
-                    .loadIcon(getPackageManager());
-        } catch (PackageManager.NameNotFoundException e) {
-            return getPackageManager().getDefaultActivityIcon();
         }
     }
 
