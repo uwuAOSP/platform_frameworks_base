@@ -501,16 +501,8 @@ NoSettingsProvider: android.provider.Settings.Secure#MOMENT_NOTIFICATION_CLICK_L
     New setting keys are not allowed (Field: MOMENT_NOTIFICATION_CLICK_LANDSCAPE_ENABLED); use getters/setters in relevant manager class
 NoSettingsProvider: android.provider.Settings.Secure#MOMENT_NOTIFICATION_CLICK_PORTRAIT_ENABLED:
     New setting keys are not allowed (Field: MOMENT_NOTIFICATION_CLICK_PORTRAIT_ENABLED); use getters/setters in relevant manager class
-NoSettingsProvider: android.provider.Settings.Secure#QS_SHOW_COLLAPSED_BRIGHTNESS:
-    New setting keys are not allowed (Field: QS_SHOW_COLLAPSED_BRIGHTNESS); use getters/setters in relevant manager class
-NoSettingsProvider: android.provider.Settings.Secure#QS_UI_STYLE:
-    New setting keys are not allowed (Field: QS_UI_STYLE); use getters/setters in relevant manager class
-NoSettingsProvider: android.provider.Settings.Secure#QS_VISUAL_STYLE_MIGRATION_VERSION:
-    New setting keys are not allowed (Field: QS_VISUAL_STYLE_MIGRATION_VERSION); use getters/setters in relevant manager class
 NoSettingsProvider: android.provider.Settings.Secure#UWU_APP_BACKGROUND_IGNORE_TASK_REMOVAL:
     New setting keys are not allowed (Field: UWU_APP_BACKGROUND_IGNORE_TASK_REMOVAL); use getters/setters in relevant manager class
-NoSettingsProvider: android.provider.Settings.Secure#UWU_QS_TRANSPARENCY_ENABLED:
-    New setting keys are not allowed (Field: UWU_QS_TRANSPARENCY_ENABLED); use getters/setters in relevant manager class
 
 
 RequiresPermission: android.accounts.AccountManager#addAccount(String, String, String[], android.os.Bundle, android.app.Activity, android.accounts.AccountManagerCallback<android.os.Bundle>, android.os.Handler):
@@ -1659,20 +1651,8 @@ UnflaggedApi: android.provider.Settings.Secure#MOMENT_NOTIFICATION_CLICK_LANDSCA
     New API must be flagged with @FlaggedApi: field android.provider.Settings.Secure.MOMENT_NOTIFICATION_CLICK_LANDSCAPE_ENABLED
 UnflaggedApi: android.provider.Settings.Secure#MOMENT_NOTIFICATION_CLICK_PORTRAIT_ENABLED:
     New API must be flagged with @FlaggedApi: field android.provider.Settings.Secure.MOMENT_NOTIFICATION_CLICK_PORTRAIT_ENABLED
-UnflaggedApi: android.provider.Settings.Secure#QS_SHOW_COLLAPSED_BRIGHTNESS:
-    New API must be flagged with @FlaggedApi: field android.provider.Settings.Secure.QS_SHOW_COLLAPSED_BRIGHTNESS
-UnflaggedApi: android.provider.Settings.Secure#QS_UI_STYLE:
-    New API must be flagged with @FlaggedApi: field android.provider.Settings.Secure.QS_UI_STYLE
-UnflaggedApi: android.provider.Settings.Secure#QS_UI_STYLE_DEFAULT:
-    New API must be flagged with @FlaggedApi: field android.provider.Settings.Secure.QS_UI_STYLE_DEFAULT
-UnflaggedApi: android.provider.Settings.Secure#QS_UI_STYLE_UWU:
-    New API must be flagged with @FlaggedApi: field android.provider.Settings.Secure.QS_UI_STYLE_UWU
-UnflaggedApi: android.provider.Settings.Secure#QS_VISUAL_STYLE_MIGRATION_VERSION:
-    New API must be flagged with @FlaggedApi: field android.provider.Settings.Secure.QS_VISUAL_STYLE_MIGRATION_VERSION
 UnflaggedApi: android.provider.Settings.Secure#UWU_APP_BACKGROUND_IGNORE_TASK_REMOVAL:
     New API must be flagged with @FlaggedApi: field android.provider.Settings.Secure.UWU_APP_BACKGROUND_IGNORE_TASK_REMOVAL
-UnflaggedApi: android.provider.Settings.Secure#UWU_QS_TRANSPARENCY_ENABLED:
-    New API must be flagged with @FlaggedApi: field android.provider.Settings.Secure.UWU_QS_TRANSPARENCY_ENABLED
 UnflaggedApi: android.telecom.Call.Details#getId():
     New API must be flagged with @FlaggedApi: method android.telecom.Call.Details.getId()
 UnflaggedApi: android.telephony.PhoneNumberUtils#isWpsCallNumber(String):
