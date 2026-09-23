@@ -13507,12 +13507,20 @@ public final class Settings {
         public static final String UWU_APP_CLIPBOARD_POLICIES =
                 "uwu_app_clipboard_policies";
 
-        /** Per-user JSON map from package name to clipboard read policy. @hide */
+        /**
+         * Per-user JSON map from package name to clipboard read policy.
+         *
+         * @hide
+         */
         @Readable
         public static final String UWU_APP_CLIPBOARD_READ_POLICIES =
                 "uwu_app_clipboard_read_policies";
 
-        /** Per-user JSON map from package name to clipboard write policy. @hide */
+        /**
+         * Per-user JSON map from package name to clipboard write policy.
+         *
+         * @hide
+         */
         @Readable
         public static final String UWU_APP_CLIPBOARD_WRITE_POLICIES =
                 "uwu_app_clipboard_write_policies";
