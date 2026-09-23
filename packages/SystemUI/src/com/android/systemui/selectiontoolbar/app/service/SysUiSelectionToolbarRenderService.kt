@@ -46,6 +46,7 @@ class SysUiSelectionToolbarRenderService : SelectionToolbarRenderService() {
                     callbackWrapper,
                     ::transferTouch,
                     ::onPasteAction,
+                    ::onCopyAction,
                 )
             toolbarCache[uid] = toolbar
             toolbar.show(showInfo)

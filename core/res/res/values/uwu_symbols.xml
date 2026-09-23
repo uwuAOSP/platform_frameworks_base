@@ -48,6 +48,7 @@
     <java-symbol type="drawable" name="app_jump_action_background_top" />
     <java-symbol type="drawable" name="app_jump_action_background_middle" />
     <java-symbol type="drawable" name="app_jump_action_background_bottom" />
+    <java-symbol type="drawable" name="ic_clipboard_access_hand" />
     <java-symbol type="dimen" name="app_jump_action_button_margin_top" />
     <java-symbol type="dimen" name="app_jump_action_button_margin_bottom" />
 </resources>

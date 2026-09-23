@@ -169,6 +169,19 @@ public abstract class SelectionToolbarRenderService extends Service {
         }
     }
 
+    protected void onCopyAction(int uid) {
+        final ISelectionToolbarRenderServiceCallback callback = mServiceCallback;
+        if (callback == null) {
+            Log.e(TAG, "onCopyAction(): no server callback");
+            return;
+        }
+        try {
+            callback.onCopyAction(uid);
+        } catch (RemoteException e) {
+            Log.e(TAG, "Failed to notify onCopyAction", e);
+        }
+    }
+
     /**
      * Called when showing the selection toolbar.
      */

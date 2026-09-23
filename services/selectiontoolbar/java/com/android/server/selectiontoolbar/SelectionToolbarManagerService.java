@@ -109,6 +109,11 @@ public class SelectionToolbarManagerService extends SystemService {
         public void onPasteAction(int uid) {
             mClipboardManagerInternal.notifyUserAuthorizedClipAccess(uid);
         }
+
+        @Override
+        public void onCopyAction(int uid) {
+            mClipboardManagerInternal.notifyUserAuthorizedClipWrite(uid);
+        }
     }
 
     private static class RemoteRenderServiceConnector extends

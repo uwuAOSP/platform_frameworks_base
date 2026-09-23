@@ -85,6 +85,7 @@ class RemoteSelectionToolbar(
     private val callbackWrapper: RemoteCallbackWrapper,
     transferTouchListener: TransferTouchListener,
     onPasteActionCallback: OnPasteActionCallback,
+    onCopyActionCallback: (Int) -> Unit,
 ) {
     private val context = wrapContext(baseContext, showInfo)
 
@@ -234,13 +235,14 @@ class RemoteSelectionToolbar(
     /* Menu items and click listeners */
     private val menuItemButtonOnClickListener =
         View.OnClickListener { v: View ->
-            // Post the callback to fg thread because the onPasteAction() callback
-            // needs to be synchronous but it shouldn't block the main thread.
+            // Notify the service before the app handles a clipboard menu action.
             handler.post {
                 val tag = v.tag
                 if (tag is ToolbarMenuItem) {
                     if (tag.itemId == R.id.paste || tag.itemId == R.id.pasteAsPlainText) {
                         onPasteActionCallback.onPasteAction(hostUid)
+                    } else if (tag.itemId == R.id.copy || tag.itemId == R.id.cut) {
+                        onCopyActionCallback(hostUid)
                     }
                     callbackWrapper.onMenuItemClicked(tag.itemIndex)
                 }

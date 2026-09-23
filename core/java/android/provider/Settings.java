@@ -13491,13 +13491,26 @@ public final class Settings {
 
         /**
          * Per-user JSON map from package name to uwuAOSP clipboard access policy.
-         * Allow-policy entries are omitted.
          *
          * @hide
          */
         @Readable
         public static final String UWU_APP_CLIPBOARD_POLICIES =
                 "uwu_app_clipboard_policies";
+
+        /** Per-user JSON map from package name to clipboard read policy. @hide */
+        @Readable
+        public static final String UWU_APP_CLIPBOARD_READ_POLICIES =
+                "uwu_app_clipboard_read_policies";
+
+        /** Per-user JSON map from package name to clipboard write policy. @hide */
+        @Readable
+        public static final String UWU_APP_CLIPBOARD_WRITE_POLICIES =
+                "uwu_app_clipboard_write_policies";
+
+        /** @hide */
+        public static final String UWU_APP_CLIPBOARD_PROMPTS_ENABLED =
+                "uwu_app_clipboard_prompts_enabled";
 
         /** @hide */
         public static final int UWU_APP_CLIPBOARD_POLICY_ALLOW = 0;

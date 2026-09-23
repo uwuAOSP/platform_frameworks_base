@@ -28,4 +28,7 @@ public interface ClipboardManagerInternal {
      * @param uid The uid expected to access clip data.
      */
     void notifyUserAuthorizedClipAccess(int uid);
+
+    /** Notify that the user selected Copy or Cut in the trusted selection toolbar. */
+    void notifyUserAuthorizedClipWrite(int uid);
 }
