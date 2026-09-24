@@ -42,6 +42,7 @@ import com.android.systemui.statusbar.notification.collection.provider.SectionSt
 import com.android.systemui.statusbar.notification.data.repository.ActiveNotificationListRepository
 import com.android.systemui.statusbar.notification.data.repository.ActiveNotificationsStore
 import com.android.systemui.statusbar.notification.domain.interactor.RenderNotificationListInteractor.Companion.IS_SCREEN_SHARE_NOTIFICATION
+import com.android.systemui.statusbar.notification.domain.interactor.RenderNotificationListInteractor.Companion.IS_TEXT_ONLY_CHIP
 import com.android.systemui.statusbar.notification.promoted.shared.model.PromotedNotificationContentModels
 import com.android.systemui.statusbar.notification.shared.ActiveBundleModel
 import com.android.systemui.statusbar.notification.shared.ActiveNotificationEntryModel
