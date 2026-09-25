@@ -13499,6 +13499,21 @@ public final class Settings {
         public static final String UWU_APP_CLIPBOARD_POLICIES =
                 "uwu_app_clipboard_policies";
 
+        /** Per-user JSON map for clipboard read policies. @hide */
+        @Readable
+        public static final String UWU_APP_CLIPBOARD_READ_POLICIES =
+                "uwu_app_clipboard_read_policies";
+
+        /** Per-user JSON map for clipboard write policies. @hide */
+        @Readable
+        public static final String UWU_APP_CLIPBOARD_WRITE_POLICIES =
+                "uwu_app_clipboard_write_policies";
+
+        /** Whether clipboard policy prompts are enabled. @hide */
+        @Readable
+        public static final String UWU_APP_CLIPBOARD_PROMPTS_ENABLED =
+                "uwu_app_clipboard_prompts_enabled";
+
         /** @hide */
         public static final int UWU_APP_CLIPBOARD_POLICY_ALLOW = 0;
 
