@@ -117,7 +117,7 @@ constructor(
                     pinInput,
                     isAutoConfirmEnabled && hintedPinLength != null,
                 )
-            )
+            }
             .hydratedStateOf(
                 initialValue =
                     computeBackspaceButtonAppearance(
