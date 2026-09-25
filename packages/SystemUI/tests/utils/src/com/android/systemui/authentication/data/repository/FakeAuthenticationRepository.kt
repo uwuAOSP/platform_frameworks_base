@@ -84,6 +84,7 @@ class FakeAuthenticationRepository(private val currentTimeMs: () -> Long) :
         _isShowPasswordsPhysicalEnabled.asStateFlow()
 
     private var credentialOverride: List<Any>? = null
+    private var pinLengthOverride: Int? = null
     private var securityMode: SecurityMode = DEFAULT_AUTHENTICATION_METHOD.toSecurityMode()
 
     var lockoutStartedReportCount = 0
@@ -118,6 +119,10 @@ class FakeAuthenticationRepository(private val currentTimeMs: () -> Long) :
 
     fun overrideCredential(pin: List<Int>) {
         credentialOverride = pin
+    }
+
+    fun overridePinLength(pinLength: Int) {
+        pinLengthOverride = pinLength
     }
 
     override suspend fun reportAuthenticationAttempt(
@@ -168,7 +173,7 @@ class FakeAuthenticationRepository(private val currentTimeMs: () -> Long) :
         profileWithMinFailedUnlockAttemptsForWipe
 
     override suspend fun getPinLength(): Int {
-        return (credentialOverride ?: DEFAULT_PIN).size
+        return pinLengthOverride ?: (credentialOverride ?: DEFAULT_PIN).size
     }
 
     fun setAutoConfirmFeatureEnabled(isEnabled: Boolean) {

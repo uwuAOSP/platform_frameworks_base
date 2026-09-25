@@ -257,6 +257,23 @@ class AuthenticationInteractorTest : SysuiTestCase() {
         }
 
     @Test
+    fun tryAutoConfirm_withUnavailablePinLength_returnsSkipped() =
+        kosmos.runTest {
+            kosmos.fakeAuthenticationRepository.apply {
+                setAuthenticationMethod(Pin)
+                setAutoConfirmFeatureEnabled(true)
+                overridePinLength(LockPatternUtils.PIN_LENGTH_UNAVAILABLE)
+            }
+
+            assertSkipped(
+                underTest.authenticate(
+                    listOf(0),
+                    tryAutoConfirm = true,
+                )
+            )
+        }
+
+    @Test
     fun tryAutoConfirm_withAutoConfirmWrongPinCorrectLength_returnsFalse() =
         kosmos.runTest {
             val isAutoConfirmEnabled by collectLastValue(underTest.isAutoConfirmEnabled)
