@@ -14802,6 +14802,15 @@ public final class Settings {
                 "uwu_external_desktop_allow_scrcpy_virtual_display";
 
         /**
+         * Previous mirror setting saved while external desktop projection is active.
+         *
+         * @hide
+         */
+        @Readable
+        public static final String UWU_EXTERNAL_DESKTOP_MIRROR_PREVIOUS =
+                "uwu_external_desktop_mirror_previous";
+
+        /**
          * Integer property which determines whether advanced protection is on or not.
          * @hide
          */
