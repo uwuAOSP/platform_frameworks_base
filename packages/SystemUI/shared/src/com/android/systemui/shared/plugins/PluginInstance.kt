@@ -299,8 +299,13 @@ class PluginInstance<T : Plugin>(
             componentName: ComponentName,
             pluginClass: Class<T>,
             listener: PluginListener<T>,
+            allowNonPrivileged: Boolean = false,
         ): PluginInstance<T>? {
-            if (!env.isDebuggable && !packages.isPackagePrivileged(pluginAppInfo.packageName)) {
+            if (
+                !env.isDebuggable &&
+                    !allowNonPrivileged &&
+                    !packages.isPackagePrivileged(pluginAppInfo.packageName)
+            ) {
                 logger.w({ "Cannot build non-privileged plugin. Src: $str1, pkg: $str2" }) {
                     str1 = pluginAppInfo.sourceDir
                     str2 = pluginAppInfo.packageName
