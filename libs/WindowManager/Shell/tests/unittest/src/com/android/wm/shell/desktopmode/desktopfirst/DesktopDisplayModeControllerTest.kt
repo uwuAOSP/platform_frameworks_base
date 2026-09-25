@@ -166,6 +166,8 @@ class DesktopDisplayModeControllerTest(
         whenever(desktopWallpaperActivityTokenProvider.getToken()).thenReturn(wallpaperToken)
         whenever(displayController.getDisplay(DEFAULT_DISPLAY)).thenReturn(defaultDisplay)
         whenever(displayController.getDisplay(EXTERNAL_DISPLAY_ID)).thenReturn(externalDisplay)
+        whenever(defaultDisplay.canHostTasks()).thenReturn(true)
+        whenever(externalDisplay.canHostTasks()).thenReturn(true)
         desktopState.canEnterDesktopMode = true
         whenever(touchpadDevice.supportsSource(InputDevice.SOURCE_TOUCHPAD)).thenReturn(true)
         whenever(touchpadDevice.isEnabled()).thenReturn(true)

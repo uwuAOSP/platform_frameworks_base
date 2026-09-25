@@ -22,6 +22,7 @@ import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.provider.Settings;
 import android.util.DisplayMetrics;
+import android.view.Display;
 import android.view.Surface;
 import android.window.DesktopModeFlags;
 
@@ -121,6 +122,14 @@ public final class DesktopModeHelper {
         return Settings.Secure.getIntForUser(context.getContentResolver(),
                 Settings.Secure.UWU_EXTERNAL_DESKTOP_ALLOW_SCRCPY_VIRTUAL_DISPLAY, 1,
                 UserHandle.USER_CURRENT) != 0;
+    }
+
+    /** Returns whether the display is the virtual display created for screen recording. */
+    public static boolean isMediaProjectionDisplay(@NonNull Display display) {
+        return display.getType() == Display.TYPE_VIRTUAL
+                && "com.android.systemui".equals(display.getOwnerPackageName())
+                && display.getUniqueId() != null
+                && display.getUniqueId().contains(",Recording Display,");
     }
 
     @VisibleForTesting

@@ -133,6 +133,7 @@ class DesktopDisplayEventHandlerTest : ShellTestCase() {
             .addDisplayWindowListener(onDisplaysChangedListenerCaptor.capture())
         val mockDisplay = mock<Display>()
         whenever(mockDisplay.uniqueId).thenReturn(UNIQUE_DISPLAY_ID)
+        whenever(mockDisplay.canHostTasks()).thenReturn(true)
         whenever(displayController.getDisplay(externalDisplayId)).thenReturn(mockDisplay)
     }
 
@@ -528,6 +529,40 @@ class DesktopDisplayEventHandlerTest : ShellTestCase() {
         verify(mockDesktopDisplayModeController)
             .updateExternalDisplayWindowingMode(externalDisplayId)
         verify(mockDesktopDisplayModeController).updateDefaultDisplayWindowingMode()
+    }
+
+    @Test
+    fun testConnectMediaProjectionDisplay_doesNotUpdateDesktopMode() {
+        val recordingDisplay = mock<Display>()
+        whenever(recordingDisplay.type).thenReturn(Display.TYPE_VIRTUAL)
+        whenever(recordingDisplay.ownerPackageName).thenReturn("com.android.systemui")
+        whenever(recordingDisplay.uniqueId)
+            .thenReturn("virtual:com.android.systemui,10216,Recording Display,0")
+        whenever(displayController.getDisplay(externalDisplayId)).thenReturn(recordingDisplay)
+
+        onDisplaysChangedListenerCaptor.lastValue.onDisplayAdded(externalDisplayId)
+
+        verify(mockRootTaskDisplayAreaOrganizer, never())
+            .registerListener(eq(externalDisplayId), any())
+        verify(mockDesktopDisplayModeController, never())
+            .updateExternalDisplayWindowingMode(externalDisplayId)
+        verify(mockDesktopDisplayModeController, never()).updateDefaultDisplayWindowingMode()
+    }
+
+    @Test
+    fun testDisconnectMediaProjectionDisplay_doesNotUpdateDesktopMode() {
+        val recordingDisplay = mock<Display>()
+        whenever(recordingDisplay.type).thenReturn(Display.TYPE_VIRTUAL)
+        whenever(recordingDisplay.ownerPackageName).thenReturn("com.android.systemui")
+        whenever(recordingDisplay.uniqueId)
+            .thenReturn("virtual:com.android.systemui,10216,Recording Display,0")
+        whenever(displayController.getDisplay(externalDisplayId)).thenReturn(recordingDisplay)
+        onDisplaysChangedListenerCaptor.lastValue.onDisplayAdded(externalDisplayId)
+        clearInvocations(mockDesktopDisplayModeController)
+
+        onDisplaysChangedListenerCaptor.lastValue.onDisplayRemoved(externalDisplayId)
+
+        verify(mockDesktopDisplayModeController, never()).updateDefaultDisplayWindowingMode()
     }
 
     @Test

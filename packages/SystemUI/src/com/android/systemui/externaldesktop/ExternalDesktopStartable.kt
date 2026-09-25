@@ -61,12 +61,14 @@ constructor(
                 if (isExternalDesktopDisplay(display)) {
                     focusExternalDisplay(displayId)
                 }
+                restoreProjectionIfDisconnected()
             }
 
             override fun onDisplayRemoved(displayId: Int) {
                 val wasExternal = externalDisplayIds.remove(displayId)
                 updateBlankingView()
                 if (wasExternal && externalDisplayIds.isEmpty()) restoreBuiltInDisplay()
+                restoreProjectionIfDisconnected()
             }
 
             override fun onDisplayChanged(displayId: Int) {
@@ -116,15 +118,23 @@ constructor(
             settingsObserver,
             UserHandle.USER_ALL,
         )
+        context.contentResolver.registerContentObserver(
+            Settings.Secure.getUriFor(Settings.Secure.MIRROR_BUILT_IN_DISPLAY),
+            false,
+            settingsObserver,
+            UserHandle.USER_ALL,
+        )
         userTracker.addCallback(userCallback, context.mainExecutor)
         syncExternalDisplays()
         updateBlankingView()
         if (isEnabled()) focusExternalDisplay()
+        restoreProjectionIfDisconnected()
     }
 
     private fun updateBlankingView() {
         val shouldBlank =
-            isEnabled() && shouldBlankInternalDisplay() && activeExternalDisplays().isNotEmpty()
+            isEnabled() && !isProjectionActive() && shouldBlankInternalDisplay() &&
+                activeExternalDisplays().isNotEmpty()
         if (shouldBlank) showBlankingView() else hideBlankingView()
     }
 
@@ -217,6 +227,9 @@ constructor(
     private fun activeExternalDisplays(): List<Display> =
         displayManager.displays.filter(::isExternalDesktopDisplay)
 
+    private fun connectedExternalDisplays(): List<Display> =
+        displayManager.displays.filter(::isConnectedExternalDisplay)
+
     private fun syncExternalDisplays() {
         externalDisplayIds.clear()
         activeExternalDisplays().mapTo(externalDisplayIds) { it.displayId }
@@ -226,7 +239,10 @@ constructor(
         val hadExternalDesktop = externalDisplayIds.isNotEmpty() || blankingView != null
         syncExternalDisplays()
         updateBlankingView()
-        if (externalDisplayIds.isNotEmpty()) {
+        if (isProjectionActive()) {
+            restoreProjectionIfDisconnected()
+            return
+        } else if (externalDisplayIds.isNotEmpty()) {
             focusExternalDisplay()
         } else if (hadExternalDesktop) {
             restoreBuiltInDisplay()
@@ -235,7 +251,8 @@ constructor(
 
     private fun isExternalDesktopDisplay(display: Display?): Boolean {
         if (display == null || display.displayId == Display.DEFAULT_DISPLAY) return false
-        if (!isEnabled()) return false
+        if (isMediaProjectionDisplay(display)) return false
+        if (!isEnabled() || isProjectionActive()) return false
         if (display.state == Display.STATE_OFF) return false
         return when (display.type) {
             Display.TYPE_EXTERNAL,
@@ -249,7 +266,22 @@ constructor(
         }
     }
 
+    private fun isConnectedExternalDisplay(display: Display?): Boolean {
+        if (display == null || display.displayId == Display.DEFAULT_DISPLAY) return false
+        if (isMediaProjectionDisplay(display) || display.state == Display.STATE_OFF) return false
+        return when (display.type) {
+            Display.TYPE_EXTERNAL, Display.TYPE_OVERLAY -> true
+            Display.TYPE_VIRTUAL -> {
+                val isScrcpyDisplay = display.name.contains("scrcpy", ignoreCase = true)
+                allowScrcpyVirtualDisplay() &&
+                    (display.flags and Display.FLAG_PRESENTATION != 0 || isScrcpyDisplay)
+            }
+            else -> display.flags and Display.FLAG_PRESENTATION != 0
+        }
+    }
+
     private fun focusExternalDisplay(displayId: Int? = null) {
+        if (isProjectionActive()) return
         val targetId =
             displayId ?: activeExternalDisplays().maxByOrNull { it.displayId }?.displayId ?: return
         FOCUS_RETRY_DELAYS.forEach { delay -> focusDisplay(targetId, delay) }
@@ -310,6 +342,43 @@ constructor(
             1,
             userTracker.userId,
         ) != 0
+
+    private fun isProjectionActive() =
+        isEnabled() &&
+            Settings.Secure.getIntForUser(
+                context.contentResolver,
+                Settings.Secure.MIRROR_BUILT_IN_DISPLAY,
+                0,
+                userTracker.userId,
+            ) != 0
+
+    private fun restoreProjectionIfDisconnected() {
+        if (connectedExternalDisplays().isNotEmpty()) return
+        val previous = Settings.Secure.getIntForUser(
+            context.contentResolver,
+            Settings.Secure.UWU_EXTERNAL_DESKTOP_MIRROR_PREVIOUS,
+            -1,
+            userTracker.userId,
+        )
+        if (previous == -1) return
+        Settings.Secure.putIntForUser(
+            context.contentResolver,
+            Settings.Secure.MIRROR_BUILT_IN_DISPLAY,
+            previous,
+            userTracker.userId,
+        )
+        Settings.Secure.putIntForUser(
+            context.contentResolver,
+            Settings.Secure.UWU_EXTERNAL_DESKTOP_MIRROR_PREVIOUS,
+            -1,
+            userTracker.userId,
+        )
+    }
+
+    private fun isMediaProjectionDisplay(display: Display): Boolean =
+        display.type == Display.TYPE_VIRTUAL &&
+            display.ownerPackageName == "com.android.systemui" &&
+            display.uniqueId?.contains(",Recording Display,") == true
 
     private companion object {
         const val TAG = "ExternalDesktop"
