@@ -95,6 +95,7 @@ class DesktopDisplayEventHandler(
     private val boundsChangedByDisplayId = mutableSetOf<Int>()
     private val stableBoundsChangedByDisplayId = mutableSetOf<Int>()
     private val displayConfigById = mutableMapOf<Int, Configuration>()
+    private val ignoredDisplayIds = mutableSetOf<Int>()
 
     init {
         shellInit.addInitCallback({ onInit() }, this)
@@ -267,6 +268,11 @@ class DesktopDisplayEventHandler(
             Trace.TRACE_TAG_WINDOW_MANAGER,
             "DesktopDisplayEventHandler#onDisplayAdded: $displayId",
         ) {
+            if (isIgnoredDisplay(displayId)) {
+                ignoredDisplayIds.add(displayId)
+                logV("Ignoring non-task displayId=%d", displayId)
+                return@traceSection
+            }
             rootTaskDisplayAreaOrganizer.registerListener(displayId, onDisplayAreaChangeListener)
             if (displayId != DEFAULT_DISPLAY) {
                 desktopDisplayModeController.updateExternalDisplayWindowingMode(displayId)
@@ -287,6 +293,10 @@ class DesktopDisplayEventHandler(
             Trace.TRACE_TAG_WINDOW_MANAGER,
             "DesktopDisplayEventHandler#onDisplayRemoved: $displayId",
         ) {
+            if (ignoredDisplayIds.remove(displayId)) {
+                logV("Ignoring removed non-task displayId=%d", displayId)
+                return@traceSection
+            }
             rootTaskDisplayAreaOrganizer.unregisterListener(displayId, onDisplayAreaChangeListener)
             if (displayId != DEFAULT_DISPLAY) {
                 desktopDisplayModeController.updateDefaultDisplayWindowingMode()
@@ -294,6 +304,21 @@ class DesktopDisplayEventHandler(
             val uniqueDisplayId = uniqueIdByDisplayId[displayId]
             uniqueIdByDisplayId.remove(displayId)
         }
+
+    private fun isMediaProjectionDisplay(displayId: Int): Boolean {
+        val display = displayController.getDisplay(displayId) ?: return false
+        return display.type == Display.TYPE_VIRTUAL &&
+            display.ownerPackageName == MEDIA_PROJECTION_OWNER_PACKAGE &&
+            display.uniqueId?.contains(MEDIA_PROJECTION_DISPLAY_MARKER) == true
+    }
+
+    private fun isNonTaskDisplay(displayId: Int): Boolean {
+        val display = displayController.getDisplay(displayId) ?: return false
+        return !display.canHostTasks()
+    }
+
+    private fun isIgnoredDisplay(displayId: Int): Boolean =
+        isMediaProjectionDisplay(displayId) || isNonTaskDisplay(displayId)
 
     override fun requestPreserveDisplay(displayId: Int) {
         logV("requestPreserveDisplay displayId=%d", displayId)
@@ -303,7 +328,7 @@ class DesktopDisplayEventHandler(
     }
 
     override fun onDesktopModeEligibleChanged(displayId: Int) {
-        if (displayId == DEFAULT_DISPLAY) return
+        if (displayId == DEFAULT_DISPLAY || isIgnoredDisplay(displayId)) return
         if (DesktopExperienceFlags.ENABLE_DISPLAY_CONTENT_MODE_MANAGEMENT.isTrue) {
             desktopDisplayModeController.updateExternalDisplayWindowingMode(displayId)
             // The default display's windowing mode depends on the desktop eligibility of the
@@ -518,5 +543,7 @@ class DesktopDisplayEventHandler(
 
     companion object {
         private const val TAG = "DesktopDisplayEventHandler"
+        const val MEDIA_PROJECTION_OWNER_PACKAGE = "com.android.systemui"
+        const val MEDIA_PROJECTION_DISPLAY_MARKER = ",Recording Display,"
     }
 }

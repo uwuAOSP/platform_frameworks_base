@@ -160,6 +160,7 @@ class DesktopDisplayModeController(
 
     fun updateExternalDisplayWindowingMode(displayId: Int) {
         if (!DesktopExperienceFlags.ENABLE_DISPLAY_CONTENT_MODE_MANAGEMENT.isTrue) return
+        if (displayController.getDisplay(displayId)?.canHostTasks() == false) return
 
         val desktopModeSupported = desktopState.isDesktopModeSupportedOnDisplay(displayId)
         if (!desktopModeSupported) return
@@ -303,7 +304,10 @@ class DesktopDisplayModeController(
             return rootTaskDisplayAreaOrganizer
                 .getDisplayIds()
                 .filter { it != DEFAULT_DISPLAY }
-                .any { displayId -> desktopState.isDesktopModeSupportedOnDisplay(displayId) }
+                .any { displayId ->
+                    displayController.getDisplay(displayId)?.canHostTasks() == true &&
+                        desktopState.isDesktopModeSupportedOnDisplay(displayId)
+                }
         }
 
         return 0 !=
@@ -315,7 +319,9 @@ class DesktopDisplayModeController(
     }
 
     private fun hasExternalDisplay() =
-        rootTaskDisplayAreaOrganizer.getDisplayIds().any { it != DEFAULT_DISPLAY }
+        rootTaskDisplayAreaOrganizer.getDisplayIds().any { displayId ->
+            displayId != DEFAULT_DISPLAY && displayController.getDisplay(displayId)?.canHostTasks() == true
+        }
 
     private fun hasAnyTouchpadDevice() =
         inputManager.inputDeviceIds.any { deviceId ->

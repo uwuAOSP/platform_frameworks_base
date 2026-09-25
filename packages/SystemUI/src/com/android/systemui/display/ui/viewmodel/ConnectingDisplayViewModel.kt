@@ -98,6 +98,7 @@ constructor(
 
     private var dialog: Dialog? = null
     private val connectedDisplays = mutableSetOf<Int>()
+    private val projectionDisplays = mutableSetOf<Int>()
 
     /** Starts listening for pending displays. */
     @OptIn(FlowPreview::class)
@@ -116,7 +117,12 @@ constructor(
         // Listen for display disconnect events and send an a11y event when necessary
         disconnectFlow
             .debounce(200.milliseconds)
-            .onEach { if (connectedDisplays.remove(it)) handleA11y(isConnected = false) }
+            .onEach {
+                if (connectedDisplays.remove(it)) handleA11y(isConnected = false)
+                if (projectionDisplays.remove(it) && projectionDisplays.isEmpty()) {
+                    restoreExternalDesktopProjection()
+                }
+            }
             .launchIn(scope)
 
         // Let's debounce for 2 reasons:
@@ -142,6 +148,15 @@ constructor(
                         concurrentDisplaysInProgress,
                         externalDesktopEnabled,
                     )
+                }
+            }
+            .launchIn(scope)
+
+        externalDesktopEnabledFlow
+            .onEach { enabled ->
+                if (!enabled) {
+                    projectionDisplays.clear()
+                    restoreExternalDesktopProjection()
                 }
             }
             .launchIn(scope)
@@ -235,7 +250,7 @@ constructor(
                 )
             }
             externalDesktopEnabled -> {
-                pendingDisplay.enableForDesktop()
+                pendingDisplay.enableForExternalDesktopProjection()
                 handleA11y(isConnected = true)
             }
             isInExtendedMode -> {
@@ -262,6 +277,34 @@ constructor(
 
     private suspend fun PendingDisplay.enableForDesktop() =
         withContext(bgDispatcher) { applyConnectionChoice(enableMirroring = false) }
+
+    private suspend fun PendingDisplay.enableForExternalDesktopProjection() {
+        withContext(bgDispatcher) {
+            val saved = secureSettings.getInt(
+                Settings.Secure.UWU_EXTERNAL_DESKTOP_MIRROR_PREVIOUS,
+                -1,
+            )
+            if (saved == -1) {
+                val current = secureSettings.getInt(MIRROR_BUILT_IN_DISPLAY, 0)
+                secureSettings.putInt(
+                    Settings.Secure.UWU_EXTERNAL_DESKTOP_MIRROR_PREVIOUS,
+                    current,
+                )
+                current
+            } else {
+                saved
+            }
+        }
+        if (!setDisplayMirrorSetting(enable = true)) {
+            ignore()
+            return
+        }
+        enable()
+        withContext(coroutineContext) {
+            connectedDisplays.add(id)
+            projectionDisplays.add(id)
+        }
+    }
 
     private suspend fun PendingDisplay.enableForMirroring() =
         withContext(bgDispatcher) { applyConnectionChoice(enableMirroring = true) }
@@ -301,6 +344,21 @@ constructor(
             if (currentVal == newVal) return@withContext true
             return@withContext secureSettings.putInt(MIRROR_BUILT_IN_DISPLAY, newVal)
         }
+
+    private fun restoreExternalDesktopProjection() {
+        scope.launch(context = bgDispatcher) {
+            val previous = secureSettings.getInt(
+                Settings.Secure.UWU_EXTERNAL_DESKTOP_MIRROR_PREVIOUS,
+                -1,
+            )
+            if (previous == -1) return@launch
+            val current = secureSettings.getInt(MIRROR_BUILT_IN_DISPLAY, 0)
+            if (current == 1) {
+                secureSettings.putInt(MIRROR_BUILT_IN_DISPLAY, previous)
+            }
+            secureSettings.putInt(Settings.Secure.UWU_EXTERNAL_DESKTOP_MIRROR_PREVIOUS, -1)
+        }
+    }
 
     private fun isUwuExternalDesktopEnabled() =
         secureSettings.getInt(Settings.Secure.UWU_EXTERNAL_DESKTOP_ENABLED, 0) != 0

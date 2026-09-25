@@ -6176,6 +6176,7 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
                 || type == Display.TYPE_WIFI
                 || type == Display.TYPE_OVERLAY
                 || (type == Display.TYPE_VIRTUAL
+                        && !DesktopModeHelper.isMediaProjectionDisplay(mDisplay)
                         && ((mDisplay.getFlags() & FLAG_SHOULD_SHOW_SYSTEM_DECORATIONS) != 0
                                 || (mDisplay.getFlags() & Display.FLAG_PRESENTATION) != 0
                                 || isScrcpyVirtualDisplay));
