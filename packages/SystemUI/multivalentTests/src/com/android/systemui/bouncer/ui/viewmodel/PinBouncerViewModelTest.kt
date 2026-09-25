@@ -391,6 +391,18 @@ class PinBouncerViewModelTest : SysuiTestCase() {
         }
 
     @Test
+    fun confirmButtonAppearance_withUnavailablePinLength_isShown() =
+        kosmos.runTest {
+            val confirmButtonAppearance by collectLastValue(underTest.confirmButtonAppearance)
+            fakeAuthenticationRepository.setAuthenticationMethod(AuthenticationMethodModel.Pin)
+            fakeAuthenticationRepository.overridePinLength(LockPatternUtils.PIN_LENGTH_UNAVAILABLE)
+            fakeAuthenticationRepository.setAutoConfirmFeatureEnabled(true)
+            runCurrent()
+
+            assertThat(confirmButtonAppearance).isEqualTo(ActionButtonAppearance.Shown)
+        }
+
+    @Test
     fun isDigitButtonAnimationEnabled() =
         kosmos.runTest {
             val isAnimationEnabled by collectLastValue(underTest.isDigitButtonAnimationEnabled)
