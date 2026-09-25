@@ -371,6 +371,11 @@ constructor(
             repository.lockoutEndTime != null -> true
             // Auto-confirm attempt when the feature is not enabled; skip the attempt.
             isAutoConfirmAttempt && !isAutoConfirmEnabled.value -> true
+            // An unavailable PIN length cannot be used to determine when auto-confirm should run.
+            // Keep collecting digits until the user explicitly confirms the credential.
+            authenticationMethod == Pin &&
+                isAutoConfirmAttempt &&
+                repository.getPinLength() == LockPatternUtils.PIN_LENGTH_UNAVAILABLE -> true
             // The pin is too short; skip only if this is an auto-confirm attempt.
             authenticationMethod == Pin && authenticationMethod.isInputTooShort(inputLength) ->
                 isAutoConfirmAttempt

@@ -111,13 +111,19 @@ constructor(
         combine(
                 mutablePinInput,
                 interactor.isAutoConfirmEnabled,
-                ::computeBackspaceButtonAppearance,
+                interactor.hintedPinLength,
+            ) { pinInput, isAutoConfirmEnabled, hintedPinLength ->
+                computeBackspaceButtonAppearance(
+                    pinInput,
+                    isAutoConfirmEnabled && hintedPinLength != null,
+                )
             )
             .hydratedStateOf(
                 initialValue =
                     computeBackspaceButtonAppearance(
                         mutablePinInput.value,
-                        interactor.isAutoConfirmEnabled.value,
+                        interactor.isAutoConfirmEnabled.value &&
+                            interactor.hintedPinLength.value != null,
                     )
             )
 
@@ -162,8 +168,16 @@ constructor(
             }
             launch { mutablePinInput.collect { _readyToTryAuthenticate.value = !it.isEmpty() } }
             launch {
-                interactor.isAutoConfirmEnabled
-                    .map { if (it) ActionButtonAppearance.Hidden else ActionButtonAppearance.Shown }
+                combine(interactor.isAutoConfirmEnabled, interactor.hintedPinLength) {
+                        isAutoConfirmEnabled,
+                        hintedPinLength,
+                    ->
+                    if (isAutoConfirmEnabled && hintedPinLength != null) {
+                        ActionButtonAppearance.Hidden
+                    } else {
+                        ActionButtonAppearance.Shown
+                    }
+                }
                     .collect { _confirmButtonAppearance.value = it }
             }
             launch {
