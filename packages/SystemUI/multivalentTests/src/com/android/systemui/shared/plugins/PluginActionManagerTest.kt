@@ -71,6 +71,7 @@ class PluginActionManagerTest : SysuiTestCase() {
     @Mock private lateinit var mNotificationManager: NotificationManager
     @Mock private lateinit var mPluginInstance: PluginInstance<TestPlugin>
     @Mock lateinit var mMockPluginPrefs: PluginPrefs
+    private var mAllowNonPrivileged = false
     private val mPluginInstanceFactory: PluginInstance.Factory =
         object :
             PluginInstance.Factory(
@@ -86,7 +87,9 @@ class PluginActionManagerTest : SysuiTestCase() {
                 componentName: ComponentName,
                 pluginClass: Class<T>,
                 listener: PluginListener<T>,
+                allowNonPrivileged: Boolean,
             ): PluginInstance<T> {
+                mAllowNonPrivileged = allowNonPrivileged
                 return mPluginInstance as PluginInstance<T>
             }
         }
@@ -249,6 +252,7 @@ class PluginActionManagerTest : SysuiTestCase() {
 
         mFakeExecutor.runAllReady()
 
+        assertTrue(mAllowNonPrivileged)
         verify(mPluginInstance).onCreate()
     }
 
