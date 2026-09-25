@@ -262,6 +262,7 @@ private constructor(
                     component,
                     pluginClass,
                     listener,
+                    allowNonPrivileged = isClockProvider,
                 )
             } catch (e: InvalidVersionException) {
                 reportInvalidVersion(component, component.className, e)
