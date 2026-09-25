@@ -33,6 +33,7 @@ import com.android.systemui.plugins.PluginListener
 import com.android.systemui.plugins.PluginWrapper
 import com.android.systemui.plugins.TestPlugin
 import com.android.systemui.plugins.annotations.Requires
+import com.android.systemui.plugins.keyguard.ui.clocks.ClockProviderPlugin
 import java.lang.ref.WeakReference
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
@@ -133,6 +134,24 @@ class PluginInstanceTest : SysuiTestCase() {
         mPluginInstance.onCreate()
         assertFalse(mPluginInstance.hasError)
         assertNotNull(mPluginInstance.plugin)
+    }
+
+    @Test
+    fun testNonPrivilegedClockProvider_canBeCreated() {
+        val appInfo = ApplicationInfo().apply { packageName = "com.example.clock" }
+        val componentName = ComponentName(appInfo.packageName, "ClockProvider")
+
+        val pluginInstance =
+            mPluginInstanceFactory.create(
+                spyContext,
+                appInfo,
+                componentName,
+                ClockProviderPlugin::class.java,
+                mPluginListener,
+                allowNonPrivileged = true,
+            )
+
+        assertNotNull(pluginInstance)
     }
 
     @Test
