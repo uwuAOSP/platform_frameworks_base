@@ -374,14 +374,6 @@ private fun ContentScope.QuickSettingsLayout(
         if (LocalSceneContainerPreloadedResources.current.isFullWidthShade) {
             QuickSettingsOverlayPrivacyChip(qsContainerViewModel.shadeHeaderViewModel)
             VerticalSeparator(QuickSettingsShade.Dimensions.ShortPadding)
-            QuickSettingsOverlayHeader(
-                viewModel = qsContainerViewModel.shadeHeaderViewModel,
-                modifier =
-                    Modifier.element(QuickSettingsShade.Elements.Header)
-                        .then(switchToNotificationsModifier),
-            )
-
-            VerticalSeparator(QuickSettingsShade.Dimensions.ShortPadding)
         } else {
             VerticalSeparator(QuickSettingsShade.Dimensions.VerticalPadding)
             QuickSettingsOverlayPrivacyChip(
@@ -404,6 +396,16 @@ private fun ContentScope.QuickSettingsLayout(
         )
 
         VerticalSeparator(QuickSettingsShade.Dimensions.ToolbarBottomPadding)
+
+        if (LocalSceneContainerPreloadedResources.current.isFullWidthShade) {
+            QuickSettingsOverlayHeader(
+                viewModel = qsContainerViewModel.shadeHeaderViewModel,
+                modifier =
+                    Modifier.element(QuickSettingsShade.Elements.Header)
+                        .then(switchToNotificationsModifier),
+            )
+            VerticalSeparator(QuickSettingsShade.Dimensions.ShortPadding)
+        }
 
         Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
             Media(
