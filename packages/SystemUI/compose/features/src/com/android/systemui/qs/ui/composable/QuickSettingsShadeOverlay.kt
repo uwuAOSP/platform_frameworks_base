@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onLayoutRectChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
@@ -68,6 +69,7 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.android.compose.PlatformSliderDefaults
@@ -112,6 +114,7 @@ import com.android.systemui.shade.ui.composable.OverlayShade
 import com.android.systemui.shade.ui.composable.OverlayShadeHeader
 import com.android.systemui.shade.ui.composable.QuickSettingsOverlayHeader
 import com.android.systemui.shade.ui.composable.QuickSettingsOverlayPrivacyChip
+import com.android.systemui.shade.ui.composable.switchShadeOnHorizontalSwipe
 import com.android.systemui.statusbar.notification.stack.shared.model.ShadeScrimBounds
 import com.android.systemui.statusbar.notification.stack.shared.model.ShadeScrimShape
 import com.android.systemui.statusbar.notification.stack.ui.view.NotificationScrollView
@@ -333,6 +336,7 @@ private fun ContentScope.QuickSettingsContainer(
                     isTransparencyEnabled = contentViewModel.isTransparencyEnabled,
                     volumeSliderViewModel = contentViewModel.volumeSliderViewModel,
                     audioDetailsViewModelFactory = contentViewModel.audioDetailsViewModelFactory,
+                    isDualShade = contentViewModel.shadeModeInteractor.isDualShade,
                     modifier = modifier.sysuiResTag("quick_settings_panel"),
                 )
             }
@@ -349,8 +353,20 @@ private fun ContentScope.QuickSettingsLayout(
     isTransparencyEnabled: Boolean,
     volumeSliderViewModel: AudioStreamSliderViewModel?,
     audioDetailsViewModelFactory: AudioDetailsViewModel.Factory,
+    isDualShade: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val switchToNotificationsModifier =
+        if (isDualShade) {
+            Modifier.switchShadeOnHorizontalSwipe(
+                swipeLeft = isRtl,
+                onSwipe = qsContainerViewModel.shadeHeaderViewModel::onNotificationIconChipClicked,
+            )
+        } else {
+            Modifier
+        }
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier.padding(horizontal = QuickSettingsShade.Dimensions.HorizontalPadding),
@@ -360,7 +376,9 @@ private fun ContentScope.QuickSettingsLayout(
             VerticalSeparator(QuickSettingsShade.Dimensions.ShortPadding)
             QuickSettingsOverlayHeader(
                 viewModel = qsContainerViewModel.shadeHeaderViewModel,
-                modifier = Modifier.element(QuickSettingsShade.Elements.Header),
+                modifier =
+                    Modifier.element(QuickSettingsShade.Elements.Header)
+                        .then(switchToNotificationsModifier),
             )
 
             VerticalSeparator(QuickSettingsShade.Dimensions.ShortPadding)
@@ -379,7 +397,8 @@ private fun ContentScope.QuickSettingsLayout(
             modifier =
                 Modifier.fillMaxWidth()
                     .requiredHeight(QuickSettingsShade.Dimensions.ToolbarHeight)
-                    .sysuiResTag("quick_settings_toolbar"),
+                    .sysuiResTag("quick_settings_toolbar")
+                    .then(switchToNotificationsModifier),
             viewModel = toolbarViewModel,
             isFullyVisible = { layoutState.isIdle(contentKey) },
         )
