@@ -647,6 +647,13 @@ private fun ContentScope.SplitShade(
                                                 qsContainerViewModel,
                                                 mediaInRow = false,
                                                 mediaSquishiness = { tileSquishiness },
+                                                modifier =
+                                                    Modifier.padding(
+                                                        top =
+                                                            dimensionResource(
+                                                                R.dimen.qs_panel_padding_top
+                                                            )
+                                                    ),
                                             )
                                         }
                                         FooterActionsWithAnimatedVisibility(

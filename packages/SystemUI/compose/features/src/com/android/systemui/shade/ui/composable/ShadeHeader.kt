@@ -105,6 +105,7 @@ import com.android.systemui.privacy.ui.view.ComposeOngoingPrivacyChip
 import com.android.systemui.res.R
 import com.android.systemui.scene.shared.model.DualShadeEducationElement
 import com.android.systemui.scene.shared.model.Scenes
+import com.android.systemui.shade.LargeScreenHeaderHelper
 import com.android.systemui.shade.ui.composable.ShadeHeader.Values.ClockScale
 import com.android.systemui.shade.ui.viewmodel.ShadeHeaderViewModel
 import com.android.systemui.statusbar.phone.StatusBarLocation
@@ -200,7 +201,15 @@ fun ContentScope.CollapsedShadeHeader(
 
     // This layout assumes it is globally positioned at (0, 0) and is the same size as the screen.
     CutoutAwareShadeHeader(
-        statusBarHeightPx = viewModel.statusBarHeightPx,
+        statusBarHeightPx =
+            if (isSplitShade) {
+                kotlin.math.max(
+                    viewModel.statusBarHeightPx,
+                    LargeScreenHeaderHelper.getLargeScreenHeaderHeight(LocalContext.current),
+                )
+            } else {
+                viewModel.statusBarHeightPx
+            },
         modifier = modifier.sysuiResTag(ShadeHeader.TestTags.Root),
         startContent = {
             Row(

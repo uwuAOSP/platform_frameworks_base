@@ -21,8 +21,10 @@ import android.testing.TestableLooper
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SmallTest
 import com.android.compose.animation.scene.TestContentScope
@@ -40,6 +42,7 @@ import com.android.systemui.notifications.intelligence.rules.ui.viewmodel.notifi
 import com.android.systemui.qs.composefragment.dagger.usingMediaInComposeFragment
 import com.android.systemui.qs.pipeline.domain.interactor.currentTilesInteractor
 import com.android.systemui.qs.pipeline.shared.TileSpec
+import com.android.systemui.res.R
 import com.android.systemui.scene.session.shared.SessionStorage
 import com.android.systemui.scene.session.ui.composable.SaveableSession
 import com.android.systemui.scene.session.ui.composable.Session
@@ -52,6 +55,7 @@ import com.android.systemui.statusbar.notification.stack.ui.view.notificationScr
 import com.android.systemui.statusbar.notification.stack.ui.viewmodel.notificationsPlaceholderViewModelFactory
 import com.android.systemui.statusbar.phone.ui.tintedIconManagerFactory
 import com.android.systemui.testKosmos
+import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.test.runCurrent
@@ -136,6 +140,13 @@ class ShadeSceneTest : SysuiTestCase() {
     @Test
     fun splitShadeHierarchy() =
         kosmos.runTest {
+            // A split shade must use its large-screen header and panel spacing rather than
+            // starting its content immediately below the shorter status bar.
+            val headerHeightPx = 300
+            val panelTopPaddingPx = 40
+            overrideResource(R.dimen.large_screen_shade_header_height, headerHeightPx)
+            overrideResource(R.dimen.qs_panel_padding_top, panelTopPaddingPx)
+
             val shadeSession =
                 object : SaveableSession, Session by Session(SessionStorage()) {
                     @Composable
@@ -185,5 +196,24 @@ class ShadeSceneTest : SysuiTestCase() {
 
             // Verify that the split shade qs exists.
             composeTestRule.onNodeWithTag("element:SplitShadeQuickSettings").assertExists()
+
+            val headerBounds =
+                composeTestRule
+                    .onNodeWithTag(
+                        resIdToTestTag(ShadeHeader.TestTags.Root),
+                        useUnmergedTree = true,
+                    )
+                    .getBoundsInRoot()
+            val panelBounds =
+                composeTestRule
+                    .onNodeWithTag(resIdToTestTag("quick_settings_panel"), useUnmergedTree = true)
+                    .getBoundsInRoot()
+            with(composeTestRule.density) {
+                assertThat(headerBounds.height.value)
+                    .isAtLeast(headerHeightPx.toDp().value - 1.dp.value)
+                assertThat((panelBounds.top - headerBounds.bottom).value)
+                    .isWithin(1.dp.value)
+                    .of(panelTopPaddingPx.toDp().value)
+            }
         }
 }

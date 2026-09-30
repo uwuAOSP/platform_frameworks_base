@@ -39,6 +39,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.unit.Dp
@@ -75,6 +77,7 @@ import com.android.systemui.plugins.keyguard.ui.composable.elements.LockscreenSc
 import com.android.systemui.res.R
 import com.android.systemui.shade.ShadeDisplayAware
 import com.android.systemui.shade.shared.model.ShadeMode
+import com.android.systemui.util.Utils
 import com.google.errorprone.annotations.CompileTimeConstant
 import javax.inject.Inject
 
@@ -119,7 +122,18 @@ constructor(
             aodAlignment: Alignment,
             modifier: Modifier = Modifier,
         ) {
-            Box(modifier = Modifier.fillMaxSize().then(modifier)) {
+            // The root already places the upper region below the keyguard status bar. The
+            // split-shade margin is measured from the screen top, so only add the remainder.
+            val topPadding =
+                if (viewModel.shadeMode == ShadeMode.Split) {
+                    val topMargin = dimensionResource(R.dimen.keyguard_split_shade_top_margin)
+                    val statusBarHeight =
+                        Utils.getStatusBarHeaderHeightKeyguard(LocalContext.current)
+                    with(LocalDensity.current) { max(0.dp, topMargin - statusBarHeight.toDp()) }
+                } else {
+                    0.dp
+                }
+            Box(modifier = Modifier.fillMaxSize().padding(top = topPadding).then(modifier)) {
                 AODNotifications(Modifier.align(aodAlignment))
                 // Make the Notification section overlap with the AOD icons, to avoid jumps while
                 // animating them in.
