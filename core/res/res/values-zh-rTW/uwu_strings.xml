@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2026 The uwuAOSP Project; SPDX-License-Identifier: Apache-2.0 -->
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="clipboard_access_prompt_read_title">允許讀取剪貼簿嗎？</string>
+    <string name="clipboard_access_prompt_read_message">「<xliff:g id="app" example="筆記">%1$s</xliff:g>」想要讀取您的剪貼簿。允許後請在應用程式內重試。</string>
+    <string name="clipboard_access_prompt_write_title">允許寫入剪貼簿嗎？</string>
+    <string name="clipboard_access_prompt_write_message">「<xliff:g id="app" example="筆記">%1$s</xliff:g>」想要寫入您的剪貼簿。允許後請在應用程式內重試。</string>
+    <string name="clipboard_access_write_permanent_rule">記住本次操作</string>
+    <string name="clipboard_access_policy_save_failed">無法套用剪貼簿選擇，本次請求仍被阻擋。</string>
+</resources>
