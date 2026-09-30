@@ -21,7 +21,9 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.database.ContentObserver;
+import android.graphics.Bitmap;
 import android.graphics.Rect;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.Drawable.ConstantState;
 import android.media.MediaMetadata;
@@ -444,6 +446,7 @@ public abstract class LyricViewController implements DarkIconDispatcher.DarkRece
             stopLyric();
             return;
         }
+        setIconForAllHolders(resolveSessionIcon(mCurrentMediaController, metadata));
         String packageName = mCurrentMediaController.getPackageName();
         String mediaId = metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID);
         String artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST);
@@ -517,7 +520,6 @@ public abstract class LyricViewController implements DarkIconDispatcher.DarkRece
                 }
                 mRetryTrackKey = null;
                 mFetchRetryCount = 0;
-                setIconForAllHolders(resolveSessionIcon(requestedController));
                 updateDisplayedLyric();
             });
         });
@@ -572,7 +574,19 @@ public abstract class LyricViewController implements DarkIconDispatcher.DarkRece
         mHandler.postDelayed(mPositionUpdateRunnable, POSITION_UPDATE_INTERVAL_MS);
     }
 
-    private Drawable resolveSessionIcon(MediaController controller) {
+    private Drawable resolveSessionIcon(MediaController controller, MediaMetadata metadata) {
+        if (metadata != null) {
+            Bitmap artwork = metadata.getBitmap(MediaMetadata.METADATA_KEY_ART);
+            if (artwork == null) {
+                artwork = metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
+            }
+            if (artwork == null) {
+                artwork = metadata.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
+            }
+            if (artwork != null && !artwork.isRecycled()) {
+                return new BitmapDrawable(mContext.getResources(), artwork);
+            }
+        }
         try {
             return mContext.getPackageManager().getApplicationIcon(controller.getPackageName());
         } catch (PackageManager.NameNotFoundException e) {
