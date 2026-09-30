@@ -19,6 +19,7 @@ package com.android.server.am;
 import android.annotation.NonNull;
 import android.annotation.Nullable;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.ServiceInfo;
 import android.os.UserHandle;
 import android.provider.Settings;
 import android.util.ArrayMap;
@@ -139,6 +140,16 @@ final class AppBackgroundModeConfig {
     @VisibleForTesting
     static boolean shouldIgnoreTaskRemoval(boolean enabled, int mode) {
         return enabled && (mode == MODE_TOMBSTONE || mode == MODE_FULL || mode == MODE_AUTO);
+    }
+
+    /** Only the system OCR downloader may borrow Full mode while doing data sync. */
+    @VisibleForTesting
+    static boolean isOcrDownloadService(String packageName, String className,
+            boolean systemApp, int foregroundServiceType) {
+        return systemApp
+                && "org.uwuaosp.aicore".equals(packageName)
+                && "org.uwuaosp.aicore.ocr.OcrService".equals(className)
+                && (foregroundServiceType & ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC) != 0;
     }
 
     @VisibleForTesting
