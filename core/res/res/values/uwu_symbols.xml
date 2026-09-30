@@ -43,6 +43,8 @@
     <java-symbol type="string" name="clipboard_access_prompt_write_message" />
     <java-symbol type="string" name="clipboard_access_write_permanent_rule" />
     <java-symbol type="string" name="clipboard_access_policy_save_failed" />
+    <java-symbol type="drawable" name="ic_clipboard_access_hand" />
+    <java-symbol type="style" name="TextAppearance.DeviceDefault.Body1" />
     <java-symbol type="layout" name="app_jump_prompt_dialog" />
     <java-symbol type="drawable" name="app_jump_action_background_single" />
     <java-symbol type="drawable" name="app_jump_action_background_top" />
