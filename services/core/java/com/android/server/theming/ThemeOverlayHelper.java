@@ -30,6 +30,7 @@ import android.util.Slog;
 
 import com.android.internal.R;
 import com.android.internal.annotations.VisibleForTesting;
+import com.android.internal.graphics.BootAnimationColors;
 import com.android.server.LocalServices;
 import com.android.server.om.OverlayManagerInternal;
 import com.android.systemui.monet.ColorScheme;
@@ -203,7 +204,9 @@ public class ThemeOverlayHelper {
                 snapshot.profiles());
         checkCancellation();
 
-        commitTransaction(transaction);
+        if (commitTransaction(transaction)) {
+            persistBootAnimationColors(snapshot);
+        }
     }
 
     /**
@@ -226,7 +229,17 @@ public class ThemeOverlayHelper {
                 snapshot.profiles());
         checkCancellation();
 
-        commitTransaction(transaction);
+        if (commitTransaction(transaction) && applyToSystem) {
+            persistBootAnimationColors(snapshot);
+        }
+    }
+
+    private void persistBootAnimationColors(ThemeStatePair.OverlaySnapshot snapshot) {
+        // Only the foreground user's applied theme may replace the global boot palette.
+        ColorScheme scheme = snapshot.darkScheme();
+        BootAnimationColors.update(scheme.getAccent1().getS200(),
+                scheme.getAccent2().getS200(), scheme.getAccent3().getS200(),
+                scheme.getAccent1().getAtTone(350));
     }
 
     private void addToTransaction(OverlayManagerTransaction.Builder transaction,
