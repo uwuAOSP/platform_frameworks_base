@@ -67,6 +67,7 @@ import android.util.SparseIntArray;
 import androidx.annotation.NonNull;
 import androidx.annotation.VisibleForTesting;
 
+import com.android.internal.graphics.BootAnimationColors;
 import com.android.systemui.CoreStartable;
 import com.android.systemui.Dumpable;
 import com.android.systemui.broadcast.BroadcastDispatcher;
@@ -860,7 +861,18 @@ public class ThemeOverlayController implements CoreStartable, Dumpable {
             }
         }
 
+        final ColorScheme bootColorScheme = mDarkColorScheme;
         final Runnable onCompleteCallback = () -> {
+            if (bootColorScheme != null && bootColorScheme == mDarkColorScheme
+                    && currentUser == mUserTracker.getUserId()) {
+                // Publish only after theme application, using the same Monet palette as uwuExt.
+                // Ignore a stale callback after the foreground user/palette has changed.
+                BootAnimationColors.update(new int[]{bootColorScheme.getAccent1().getS200(),
+                        bootColorScheme.getAccent2().getS200(),
+                        bootColorScheme.getAccent3().getS200(),
+                        bootColorScheme.getAccent1().getAtTone(350)},
+                        mSystemPropertiesHelper::get, mSystemPropertiesHelper::set);
+            }
             Log.d(TAG, "ThemeHomeDelay: ThemeOverlayController ready with user "
                     + currentUser);
             mActivityManager.setThemeOverlayReady(currentUser);
