@@ -65,6 +65,7 @@ import android.content.Context;
 import android.content.IClipboard;
 import android.content.IOnPrimaryClipChangedListener;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManagerInternal;
 import android.content.pm.UserInfo;
@@ -113,6 +114,7 @@ import android.view.textclassifier.TextLinks;
 import android.widget.Toast;
 
 import com.android.internal.R;
+import com.android.internal.app.ClipboardAccessPolicy;
 import com.android.internal.app.ClipboardAccessPromptActivity;
 import com.android.internal.annotations.GuardedBy;
 import com.android.internal.annotations.VisibleForTesting;
@@ -482,10 +484,29 @@ public class ClipboardService extends SystemService {
                 }
                 policyCache.put(userId, policies);
             }
-            return policies.getOrDefault(packageName,
-                    getClipboardPromptsEnabledLocked(userId)
-                            ? Settings.Secure.UWU_APP_CLIPBOARD_POLICY_ASK
-                            : Settings.Secure.UWU_APP_CLIPBOARD_POLICY_ALLOW);
+            final Integer explicitPolicy = policies.get(packageName);
+            if (explicitPolicy != null) {
+                return explicitPolicy;
+            }
+            final boolean promptsEnabled = getClipboardPromptsEnabledLocked(userId);
+            if (!promptsEnabled) {
+                return Settings.Secure.UWU_APP_CLIPBOARD_POLICY_ALLOW;
+            }
+            final long identity = Binder.clearCallingIdentity();
+            boolean systemApp = false;
+            try {
+                final ApplicationInfo info = mPm.getApplicationInfoAsUser(packageName, 0, userId);
+                systemApp = (info.flags & (ApplicationInfo.FLAG_SYSTEM
+                        | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0;
+            } catch (PackageManager.NameNotFoundException ignored) {
+                // Unknown packages must not inherit the preinstalled-app exemption.
+            } finally {
+                Binder.restoreCallingIdentity(identity);
+            }
+            return ClipboardAccessPolicy.shouldAskByDefault(
+                    promptsEnabled, systemApp, packageName)
+                    ? Settings.Secure.UWU_APP_CLIPBOARD_POLICY_ASK
+                    : Settings.Secure.UWU_APP_CLIPBOARD_POLICY_ALLOW;
         }
     }
 
