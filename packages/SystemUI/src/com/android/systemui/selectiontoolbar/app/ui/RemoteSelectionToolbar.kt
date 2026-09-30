@@ -20,6 +20,7 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
+import android.app.AppOpsManager
 import android.content.Context
 import android.graphics.Point
 import android.graphics.Rect
@@ -27,7 +28,7 @@ import android.graphics.Region
 import android.graphics.drawable.AnimatedVectorDrawable
 import android.os.Handler
 import android.os.Looper
-import android.service.selectiontoolbar.SelectionToolbarRenderService.OnPasteActionCallback
+import android.service.selectiontoolbar.SelectionToolbarRenderService.OnClipboardActionCallback
 import android.service.selectiontoolbar.SelectionToolbarRenderService.RemoteCallbackWrapper
 import android.service.selectiontoolbar.SelectionToolbarRenderService.TransferTouchListener
 import android.text.TextUtils
@@ -84,7 +85,7 @@ class RemoteSelectionToolbar(
     showInfo: ShowInfo,
     private val callbackWrapper: RemoteCallbackWrapper,
     transferTouchListener: TransferTouchListener,
-    onPasteActionCallback: OnPasteActionCallback,
+    onClipboardActionCallback: OnClipboardActionCallback,
 ) {
     private val context = wrapContext(baseContext, showInfo)
 
@@ -234,13 +235,19 @@ class RemoteSelectionToolbar(
     /* Menu items and click listeners */
     private val menuItemButtonOnClickListener =
         View.OnClickListener { v: View ->
-            // Post the callback to fg thread because the onPasteAction() callback
+            // Post the callback to fg thread because the onClipboardAction() callback
             // needs to be synchronous but it shouldn't block the main thread.
             handler.post {
                 val tag = v.tag
                 if (tag is ToolbarMenuItem) {
-                    if (tag.itemId == R.id.paste || tag.itemId == R.id.pasteAsPlainText) {
-                        onPasteActionCallback.onPasteAction(hostUid)
+                    val operation =
+                        when (tag.itemId) {
+                            R.id.paste, R.id.pasteAsPlainText -> AppOpsManager.OP_READ_CLIPBOARD
+                            R.id.copy, R.id.cut -> AppOpsManager.OP_WRITE_CLIPBOARD
+                            else -> null
+                        }
+                    if (operation != null) {
+                        onClipboardActionCallback.onClipboardAction(hostUid, operation)
                     }
                     callbackWrapper.onMenuItemClicked(tag.itemIndex)
                 }

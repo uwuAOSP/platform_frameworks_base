@@ -3610,7 +3610,41 @@ public class PhoneWindowManager implements WindowManagerPolicy {
             }
         }
 
+        if (!needToConsumeKey) {
+            notifyUserClipboardShortcut(focusedToken, event);
+        }
         return needToConsumeKey;
+    }
+
+    private void notifyUserClipboardShortcut(IBinder focusedToken, KeyEvent event) {
+        if (focusedToken == null || event.getAction() != KeyEvent.ACTION_DOWN
+                || event.getRepeatCount() != 0 || event.isCanceled() || keyguardOn()) {
+            return;
+        }
+        final int operation;
+        if (event.hasModifiers(KeyEvent.META_CTRL_ON)
+                && (event.getKeyCode() == KeyEvent.KEYCODE_C
+                        || event.getKeyCode() == KeyEvent.KEYCODE_X)) {
+            operation = AppOpsManager.OP_WRITE_CLIPBOARD;
+        } else if (((event.hasModifiers(KeyEvent.META_CTRL_ON)
+                        || event.hasModifiers(KeyEvent.META_CTRL_ON | KeyEvent.META_SHIFT_ON))
+                        && event.getKeyCode() == KeyEvent.KEYCODE_V)
+                || (event.hasModifiers(KeyEvent.META_SHIFT_ON)
+                        && event.getKeyCode() == KeyEvent.KEYCODE_INSERT)) {
+            operation = AppOpsManager.OP_READ_CLIPBOARD;
+        } else {
+            return;
+        }
+        // This callback runs in system input dispatch, before event signing. Events
+        // fabricated inside an app do not pass through it; injection requires privilege.
+        final KeyInterceptionInfo info =
+                mWindowManagerInternal.getKeyInterceptionInfoFromToken(focusedToken);
+        final com.android.server.clipboard.ClipboardManagerInternal clipboard =
+                LocalServices.getService(
+                        com.android.server.clipboard.ClipboardManagerInternal.class);
+        if (info != null && clipboard != null) {
+            clipboard.notifyUserAuthorizedClipAction(info.windowOwnerUid, operation);
+        }
     }
 
     // You can only start consuming the key gesture if ACTION_DOWN and repeat count

@@ -169,6 +169,20 @@ public abstract class SelectionToolbarRenderService extends Service {
         }
     }
 
+    /** Notify the system before dispatching a trusted copy/cut or paste menu action. */
+    protected void onClipboardAction(int uid, int operation) {
+        final ISelectionToolbarRenderServiceCallback callback = mServiceCallback;
+        if (callback == null) {
+            Log.e(TAG, "onClipboardAction(): no server callback");
+            return;
+        }
+        try {
+            callback.onClipboardAction(uid, operation);
+        } catch (RemoteException e) {
+            Log.e(TAG, "Failed to notify onClipboardAction", e);
+        }
+    }
+
     /**
      * Called when showing the selection toolbar.
      */
@@ -265,5 +279,10 @@ public abstract class SelectionToolbarRenderService extends Service {
          * Notify the service to the paste action.
          */
         void onPasteAction(int uid);
+    }
+
+    /** A callback for a trusted clipboard menu click, before the app receives the click. */
+    public interface OnClipboardActionCallback {
+        void onClipboardAction(int uid, int operation);
     }
 }

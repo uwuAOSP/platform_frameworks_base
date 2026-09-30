@@ -17,11 +17,13 @@
 package com.android.server.selectiontoolbar;
 
 import android.annotation.NonNull;
+import android.app.AppOpsManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Binder;
 import android.os.IBinder;
+import android.os.Process;
 import android.os.UserHandle;
 import android.service.selectiontoolbar.ISelectionToolbarRenderService;
 import android.service.selectiontoolbar.ISelectionToolbarRenderServiceCallback;
@@ -107,7 +109,24 @@ public class SelectionToolbarManagerService extends SystemService {
 
         @Override
         public void onPasteAction(int uid) {
+            enforceSystemCaller();
             mClipboardManagerInternal.notifyUserAuthorizedClipAccess(uid);
+        }
+
+        @Override
+        public void onClipboardAction(int uid, int operation) {
+            enforceSystemCaller();
+            if (operation != AppOpsManager.OP_READ_CLIPBOARD
+                    && operation != AppOpsManager.OP_WRITE_CLIPBOARD) {
+                throw new IllegalArgumentException("Unknown clipboard operation: " + operation);
+            }
+            mClipboardManagerInternal.notifyUserAuthorizedClipAction(uid, operation);
+        }
+
+        private void enforceSystemCaller() {
+            if (Binder.getCallingUid() != Process.SYSTEM_UID) {
+                throw new SecurityException("Only the system toolbar may authorize clipboard actions");
+            }
         }
     }
 
