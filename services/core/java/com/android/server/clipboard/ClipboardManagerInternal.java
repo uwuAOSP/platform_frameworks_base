@@ -28,4 +28,11 @@ public interface ClipboardManagerInternal {
      * @param uid The uid expected to access clip data.
      */
     void notifyUserAuthorizedClipAccess(int uid);
+
+    /** Notify a trusted copy/cut (write) or paste (read) action, without granting the other kind. */
+    default void notifyUserAuthorizedClipAction(int uid, int operation) {
+        if (operation == android.app.AppOpsManager.OP_READ_CLIPBOARD) {
+            notifyUserAuthorizedClipAccess(uid);
+        }
+    }
 }

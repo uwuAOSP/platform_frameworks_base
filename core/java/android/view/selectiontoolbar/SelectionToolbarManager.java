@@ -22,6 +22,10 @@ import android.annotation.NonNull;
 import android.annotation.SystemService;
 import android.content.Context;
 import android.os.RemoteException;
+import android.provider.Settings;
+
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.Objects;
 
@@ -87,7 +91,39 @@ public final class SelectionToolbarManager {
     public static boolean isRemoteSelectionToolbarEnabled(Context context) {
         SelectionToolbarManager manager = context.getSystemService(SelectionToolbarManager.class);
         if (manager != null) {
-            return manager.isRemoteSelectionToolbarEnabled();
+            return manager.isRemoteSelectionToolbarEnabled()
+                    || needsTrustedClipboardToolbar(context);
+        }
+        return false;
+    }
+
+    private static boolean needsTrustedClipboardToolbar(Context context) {
+        // App-rendered menus cannot attest a user click. Use the system renderer when
+        // clipboard controls are active, so a real copy/paste click can be exempted.
+        if (Settings.Secure.getInt(context.getContentResolver(),
+                Settings.Secure.UWU_APP_CLIPBOARD_PROMPTS_ENABLED, 0) != 0) {
+            return true;
+        }
+        final String[] settings = {
+                Settings.Secure.UWU_APP_CLIPBOARD_POLICIES,
+                Settings.Secure.UWU_APP_CLIPBOARD_READ_POLICIES,
+                Settings.Secure.UWU_APP_CLIPBOARD_WRITE_POLICIES,
+        };
+        for (String setting : settings) {
+            final String value = Settings.Secure.getString(context.getContentResolver(), setting);
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            try {
+                final int policy = new JSONObject(value).optInt(context.getPackageName(),
+                        Settings.Secure.UWU_APP_CLIPBOARD_POLICY_ALLOW);
+                if (policy == Settings.Secure.UWU_APP_CLIPBOARD_POLICY_ASK
+                        || policy == Settings.Secure.UWU_APP_CLIPBOARD_POLICY_DENY) {
+                    return true;
+                }
+            } catch (JSONException ignored) {
+                // Match ClipboardService: malformed settings do not create a rule.
+            }
         }
         return false;
     }
