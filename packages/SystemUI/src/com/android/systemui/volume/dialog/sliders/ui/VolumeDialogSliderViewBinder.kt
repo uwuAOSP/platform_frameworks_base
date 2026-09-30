@@ -23,6 +23,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.runtime.Composable
@@ -30,6 +31,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.unit.Dp
@@ -175,7 +177,9 @@ private fun VolumeDialogSlider(
                         icon = {
                             Icon(
                                 icon = sliderStateModel.icon,
-                                tint = null,
+                                tint =
+                                    if (sliderStateModel.tintIcon) LocalContentColor.current
+                                    else Color.Unspecified,
                                 modifier = Modifier.size(dimensions.iconSize),
                             )
                         },
@@ -187,7 +191,9 @@ private fun VolumeDialogSlider(
                         icon = {
                             Icon(
                                 icon = sliderStateModel.icon,
-                                tint = null,
+                                tint =
+                                    if (sliderStateModel.tintIcon) LocalContentColor.current
+                                    else Color.Unspecified,
                                 modifier = Modifier.size(dimensions.iconSize),
                             )
                         },

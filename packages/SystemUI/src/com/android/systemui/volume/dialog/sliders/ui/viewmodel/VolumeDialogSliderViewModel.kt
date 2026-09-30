@@ -158,6 +158,7 @@ constructor(
                         valueRange = APP_VOLUME_MIN..APP_VOLUME_MAX,
                         icon = icon,
                         label = sliderType.label,
+                        tintIcon = false,
                     )
                 }
                 .stateIn(coroutineScope, SharingStarted.Eagerly, null)
