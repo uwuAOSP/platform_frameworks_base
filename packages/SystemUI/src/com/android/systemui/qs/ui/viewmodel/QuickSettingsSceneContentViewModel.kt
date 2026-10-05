@@ -26,6 +26,7 @@ import com.android.systemui.keyguard.ui.transitions.BlurConfig
 import com.android.systemui.lifecycle.HydratedActivatable
 import com.android.systemui.qs.FooterActionsController
 import com.android.systemui.qs.footer.ui.viewmodel.FooterActionsViewModel
+import com.android.systemui.qs.panels.ui.viewmodel.toolbar.EditModeButtonViewModel
 import com.android.systemui.scene.domain.interactor.SceneInteractor
 import com.android.systemui.scene.shared.model.Overlays
 import com.android.systemui.scene.shared.model.SceneFamilies
@@ -54,6 +55,7 @@ constructor(
     val shadeHeaderViewModelFactory: ShadeHeaderViewModel.Factory,
     qsContainerViewModelFactory: QuickSettingsContainerViewModel.Factory,
     private val footerActionsViewModelFactory: FooterActionsViewModel.Factory,
+    private val editModeButtonViewModelFactory: EditModeButtonViewModel.Factory,
     private val footerActionsController: FooterActionsController,
     private val shadeModeInteractor: ShadeModeInteractor,
     private val sceneInteractor: SceneInteractor,
@@ -99,6 +101,13 @@ constructor(
         }
         return footerActionsViewModelFactory.create(lifecycleOwner)
     }
+
+    /**
+     * Creates the edit (pencil) button used by the circular QS header row, which hosts it above the
+     * tiles instead of in the pager row under them.
+     */
+    fun getEditModeButtonViewModel(): EditModeButtonViewModel =
+        editModeButtonViewModelFactory.create()
 
     override suspend fun onActivated() {
         coroutineScope { launch { qsContainerViewModel.activate() } }

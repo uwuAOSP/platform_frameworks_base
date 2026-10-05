@@ -27,18 +27,23 @@ import androidx.compose.animation.graphics.res.animatedVectorResource
 import androidx.compose.animation.graphics.res.rememberAnimatedVectorPainter
 import androidx.compose.animation.graphics.vector.AnimatedImageVector
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -76,6 +81,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.dimensionResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -85,12 +91,17 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.android.compose.modifiers.size
 import com.android.compose.modifiers.thenIf
 import com.android.compose.ui.graphics.painter.rememberDrawablePainter
+import com.android.systemui.animation.Expandable
 import com.android.systemui.common.shared.model.Icon
 import com.android.systemui.common.ui.compose.Icon
 import com.android.systemui.common.ui.compose.load
@@ -106,14 +117,33 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults
 import com.android.systemui.qs.panels.ui.viewmodel.AccessibilityUiState
 import com.android.systemui.qs.ui.compose.borderOnFocus
 import com.android.systemui.res.R
+import com.android.internal.R as InternalR
 import kotlin.math.abs
 import platform.test.motion.compose.values.MotionTestValueKey
 import platform.test.motion.compose.values.motionTestValues
+import org.uwuaosp.systemui.qsstyle.LocalQSTileStyle
 
 private const val TEST_TAG_TILE_ICON = "qs_tile_icon"
 private const val TEST_TAG_TOGGLE = "qs_tile_toggle_target"
 private const val TEST_TAG_SMALL = "qs_tile_small"
 private const val TEST_TAG_LARGE = "qs_tile_large"
+
+/** Horizontal padding applied to the label of a circular tile so it never touches the neighbors. */
+private val CircularTileHorizontalPadding = 2.dp
+
+/** Gap between the circular icon and its label in the circular tile style. */
+private val CircularTileLabelTopPadding = 7.dp
+
+/** Fixed line slots keep single- and double-line circular tiles vertically aligned. */
+private val CircularTilePrimaryLabelHeight = 14.dp
+private val CircularTileSecondaryLabelHeight = 12.dp
+
+/** Size of the expand chevron shown next to the label of a tile that expands. */
+private val CircularChevronWidth = 10.dp
+private val CircularChevronHeight = 12.dp
+
+/** Gap between the label and the expand chevron. */
+private val CircularChevronStartPadding = 2.dp
 
 @Composable
 fun LargeTileContent(
@@ -130,8 +160,47 @@ fun LargeTileContent(
     textScale: () -> Float = { 1f },
     toggleClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
+    circular: Boolean = LocalQSTileStyle.current.isCircular,
+    showExpandChevron: Boolean = false,
+    /**
+     * Whether labels in the circular layout are painted. QQS keeps the labels in the layout as
+     * transparent placeholders so its shared-element transition has the same geometry as QS.
+     */
+    circularLabelsVisible: Boolean = true,
+    /**
+     * [Expandable] used to host the launch/return transitions of the circular style. When set (and
+     * [circular] is true) the icon becomes the host of those transitions, so that they morph into a
+     * circle centred on the icon; the label stays outside of it and is never clipped.
+     */
+    expandable: Expandable? = null,
+    /**
+     * Interaction source the tile clickable emits its presses on, used by the circular style to
+     * draw the press feedback around the icon instead of around the whole tile.
+     */
+    pressInteractionSource: InteractionSource? = null,
 ) {
     val isDualTarget = toggleClick != null
+    // The circular style puts the colored icon circle above the centered label.
+    if (circular) {
+        CircularTileContent(
+            label = label,
+            secondaryLabel = secondaryLabel,
+            iconProvider = iconProvider,
+            colors = colors,
+            iconShape = iconShape,
+            isVisible = isVisible,
+            accessibilityUiState = accessibilityUiState,
+            squishiness = squishiness,
+            modifier = modifier,
+            toggleClick = toggleClick,
+            onLongClick = onLongClick,
+            showExpandChevron = showExpandChevron,
+            circularLabelsVisible = circularLabelsVisible,
+            expandable = expandable,
+            pressInteractionSource = pressInteractionSource,
+        )
+        return
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = tileHorizontalArrangement(),
@@ -198,6 +267,207 @@ fun LargeTileContent(
     }
 }
 
+/**
+ * Circular style tile content: the state color is drawn as a circle behind the icon and the label
+ * is centered right below it. The tile itself has no pill, so only the circle carries the color.
+ */
+@Composable
+private fun CircularTileContent(
+    label: String,
+    secondaryLabel: String?,
+    iconProvider: Context.() -> Icon,
+    colors: TileColors,
+    iconShape: RoundedCornerShape,
+    isVisible: () -> Boolean,
+    accessibilityUiState: AccessibilityUiState?,
+    squishiness: () -> Float,
+    modifier: Modifier = Modifier,
+    toggleClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
+    showExpandChevron: Boolean = false,
+    circularLabelsVisible: Boolean = true,
+    expandable: Expandable? = null,
+    pressInteractionSource: InteractionSource? = null,
+) {
+    val isDualTarget = toggleClick != null
+    val animatedBackgroundColor by
+        animateColorAsState(colors.iconBackground, label = "QSCircularIconBackgroundColor")
+    val animatedLabelColor by animateColorAsState(colors.label, label = "QSCircularLabelColor")
+    val animatedSecondaryLabelColor by
+        animateColorAsState(colors.secondaryLabel, label = "QSCircularSecondaryLabelColor")
+    val focusBorderColor = MaterialTheme.colorScheme.secondary
+    val longPressLabel = longPressLabelSettings().takeIf { onLongClick != null }
+    // The press feedback of the circular style is drawn around the icon, and clipped by it, instead
+    // of being drawn around the whole tile.
+    val pressIndication = LocalIndication.current
+
+    val iconCircle: @Composable () -> Unit = {
+        Box(
+            modifier =
+                Modifier.size(CommonTileDefaults.ToggleTargetSize)
+                    .clip(iconShape)
+                    .drawBehind { drawRect(animatedBackgroundColor) }
+                    .thenIf(pressInteractionSource != null) {
+                        Modifier.indication(pressInteractionSource!!, pressIndication)
+                    }
+                    .thenIf(isDualTarget) {
+                        Modifier.borderOnFocus(color = focusBorderColor, iconShape.topEnd)
+                            .verticalSquish(squishiness)
+                            .combinedClickable(
+                                onClick = toggleClick!!,
+                                onLongClick = onLongClick,
+                                onLongClickLabel = longPressLabel,
+                                hapticFeedbackEnabled = false, // Haptics handled separately
+                            )
+                            .thenIf(accessibilityUiState != null) {
+                                Modifier.semantics {
+                                        accessibilityUiState as AccessibilityUiState
+                                        contentDescription = accessibilityUiState.contentDescription
+                                        stateDescription = accessibilityUiState.stateDescription
+                                        accessibilityUiState.toggleableState?.let {
+                                            toggleableState = it
+                                        }
+                                        role = Role.Switch
+                                    }
+                                    .sysuiResTag(TEST_TAG_TOGGLE)
+                            }
+                    },
+            contentAlignment = Alignment.Center,
+        ) {
+            SmallTileContent(
+                iconProvider = iconProvider,
+                color = colors.icon,
+                size = { CommonTileDefaults.LargeTileIconSize },
+                modifier = Modifier,
+            )
+        }
+    }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = modifier.fillMaxSize().padding(horizontal = CircularTileHorizontalPadding),
+    ) {
+        if (expandable != null) {
+            // Hosting the launch/return transitions on the icon makes their bounds a square, so
+            // their shape (and the shadow of the window that uses it) becomes a circle centred on
+            // the icon. The labels are composed below, outside of this host, so they are never
+            // clipped by it. The color is left transparent because the circle is already drawn by
+            // the icon itself, and drawing it twice would change translucent colors.
+            CircularIconExpandable(
+                expandable = expandable,
+                color = { Color.Transparent },
+                shape = CircleShape,
+            ) {
+                iconCircle()
+            }
+        } else {
+            iconCircle()
+        }
+
+        Box(modifier = Modifier.height(CircularTileLabelTopPadding))
+
+        // The label (and the expand chevron, when the tile expands) is centered as one group, like
+        // in the reference implementation where the chevron sits right after the label text.
+        Row(
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+            modifier =
+                Modifier.fillMaxWidth().height(CircularTilePrimaryLabelHeight).graphicsLayer {
+                    alpha = if (circularLabelsVisible) 1f else 0f
+                },
+        ) {
+            CircularTileLabel(
+                text = label,
+                color = { animatedLabelColor },
+                style = CircularTileLabelStyle(),
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (showExpandChevron) {
+                Image(
+                    painter =
+                        painterResource(id = InternalR.drawable.ic_chooser_group_arrow),
+                    contentDescription = null,
+                    colorFilter = ColorFilter.tint(animatedLabelColor),
+                    modifier =
+                        Modifier.padding(start = CircularChevronStartPadding)
+                            .width(CircularChevronWidth)
+                            .height(CircularChevronHeight),
+                )
+            }
+        }
+        // Keep the secondary line in the layout even when it is empty. Without this fixed slot,
+        // tiles that provide a secondary label are centered as a taller column and their icons
+        // appear higher than neighboring tiles.
+        Box(
+            modifier = Modifier.fillMaxWidth().height(CircularTileSecondaryLabelHeight),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!TextUtils.isEmpty(secondaryLabel)) {
+                CircularTileLabel(
+                    text = secondaryLabel ?: "",
+                    color = { animatedSecondaryLabelColor },
+                    style = CircularSecondaryLabelStyle(),
+                    modifier =
+                        Modifier.graphicsLayer {
+                                alpha = if (circularLabelsVisible) 1f else 0f
+                            }
+                            .thenIf(
+                            accessibilityUiState?.stateDescription?.contains(secondaryLabel ?: "") ==
+                                true
+                        ) {
+                            Modifier.clearAndSetSemantics {}
+                        },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Label used by the circular tiles.
+ *
+ * Unlike [TileLabel] it wraps its content instead of filling the tile width, which keeps a short
+ * label centered next to the expand chevron, and it ellipsizes long labels instead of letting them
+ * overflow (and be clipped at both ends, since the text is centered).
+ */
+@Composable
+private fun CircularTileLabel(
+    text: String,
+    color: ColorProducer,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+) {
+    BasicText(
+        text = text,
+        color = color,
+        style = style,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        softWrap = false,
+        modifier = modifier,
+    )
+}
+
+/** Primary label style of the circular tiles: centered, single line, 11sp. */
+@Composable
+private fun CircularTileLabelStyle(): TextStyle =
+    MaterialTheme.typography.labelMedium.copy(
+        fontSize = 11.sp,
+        lineHeight = 14.sp,
+        textAlign = TextAlign.Center,
+    )
+
+/** Secondary label style of the circular tiles: centered, single line, 9sp, regular weight. */
+@Composable
+private fun CircularSecondaryLabelStyle(): TextStyle =
+    MaterialTheme.typography.labelSmall.copy(
+        fontSize = 9.sp,
+        lineHeight = 12.sp,
+        fontWeight = FontWeight.Normal,
+        textAlign = TextAlign.Center,
+    )
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun LargeTileLabels(
@@ -246,6 +516,10 @@ fun SmallTileContent(
 ) {
     val context = LocalContext.current
     val icon = iconProvider(context)
+    val materialIcon =
+        remember(icon, context) {
+            (icon as? Icon.Resource)?.let { context.uwuMaterialTileIconVector(it.resId) }
+        }
     val animatedColor by animateColorAsState(color, label = "QSTileIconColor")
     val sizeValue = size()
     val iconModifier =
@@ -264,7 +538,14 @@ fun SmallTileContent(
     // Skip initial animation, icons should animate only as the state change
     // and not when first composed
     var shouldSkipInitialAnimation by remember { mutableStateOf(true) }
-    if (loadedDrawable is Animatable) {
+    if (materialIcon != null) {
+        androidx.compose.material3.Icon(
+            imageVector = materialIcon,
+            contentDescription = icon.contentDescription?.load(),
+            tint = animatedColor,
+            modifier = iconModifier,
+        )
+    } else if (loadedDrawable is Animatable) {
         LaunchedEffect(Unit) { shouldSkipInitialAnimation = animateToEnd }
 
         val painter =

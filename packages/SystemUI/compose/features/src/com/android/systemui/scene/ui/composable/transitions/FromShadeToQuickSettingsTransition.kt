@@ -41,6 +41,9 @@ fun TransitionBuilder.shadeToQuickSettingsTransition(
     anchoredTranslate(Elements.QuickSettingsContent, Elements.GridAnchor)
 
     sharedElement(Elements.TileElementMatcher, enabled = animateQsTilesAsShared())
+    // Circular QQS and QS use the same brightness element so it travels to its expanded
+    // position instead of rendering two independent sliders during the transition.
+    sharedElement(Elements.CircularBrightnessSlider)
 
     // This will animate between 0f (QQS) and 0.5, fading in the QQS tiles when coming back
     // from non first page QS. The QS content ends fading out at 0.43f, so there's a brief

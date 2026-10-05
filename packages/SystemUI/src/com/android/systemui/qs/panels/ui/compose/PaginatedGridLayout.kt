@@ -68,6 +68,7 @@ constructor(
         modifier: Modifier,
         listening: () -> Boolean,
         enableRevealEffect: Boolean,
+        showEditButton: Boolean,
     ) {
         val viewModel =
             rememberViewModel(traceName = "PaginatedGridLayout-TileGrid") {
@@ -153,6 +154,7 @@ constructor(
                 pagerState = pagerState,
                 showArrowsInPager = viewModel.showArrowsInPagerDots,
                 editButtonViewModelFactory = viewModel.editModeButtonViewModelFactory,
+                showEditButton = showEditButton,
                 isVisible = { listening() && layoutState.isIdle() },
             )
         }
@@ -170,6 +172,7 @@ private fun FooterBar(
     pagerState: PagerState,
     showArrowsInPager: Boolean,
     editButtonViewModelFactory: EditModeButtonViewModel.Factory,
+    showEditButton: Boolean,
     isVisible: () -> Boolean = { true },
 ) {
     val editButtonViewModel =
@@ -204,7 +207,9 @@ private fun FooterBar(
         )
         Row(Modifier.weight(1f)) {
             Spacer(modifier = Modifier.weight(1f))
-            EditModeButton(viewModel = editButtonViewModel, isVisible = isVisible())
+            if (showEditButton) {
+                EditModeButton(viewModel = editButtonViewModel, isVisible = isVisible())
+            }
         }
     }
 }

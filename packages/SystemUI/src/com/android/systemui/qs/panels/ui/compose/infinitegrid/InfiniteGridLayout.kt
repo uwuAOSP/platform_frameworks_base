@@ -19,6 +19,7 @@ package com.android.systemui.qs.panels.ui.compose.infinitegrid
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -72,6 +73,7 @@ constructor(
         modifier: Modifier,
         listening: () -> Boolean,
         enableRevealEffect: Boolean,
+        showEditButton: Boolean,
     ) {
         val viewModel =
             rememberViewModel(traceName = "InfiniteGridLayout.TileGrid") {
@@ -84,18 +86,31 @@ constructor(
                 textFeedbackContentViewModelFactory.create(context)
             }
 
+        // Read the raw setting so the style is correct even before the view model hydrates.
+        val tileStyle by viewModel.tileStyleFlow.collectAsState()
+        val circular = tileStyle.isCircular
         val columns = viewModel.columnsWithMediaViewModel.columns
-        val largeTilesSpan = viewModel.columnsWithMediaViewModel.largeSpan
+        val largeTilesSpan = if (circular) 1 else viewModel.columnsWithMediaViewModel.largeSpan
         val largeTiles by viewModel.iconTilesViewModel.largeTilesState
         // Tiles or largeTiles may be updated while this is composed, so listen to any changes
         val sizedTiles =
-            remember(tiles, largeTiles, largeTilesSpan) {
+            remember(tiles, largeTiles, largeTilesSpan, circular) {
                 tiles.map {
-                    SizedTileImpl(it, if (largeTiles.contains(it.spec)) largeTilesSpan else 1)
+                    SizedTileImpl(
+                        it,
+                        if (!circular && largeTiles.contains(it.spec)) largeTilesSpan else 1,
+                    )
                 }
             }
         val squishiness by viewModel.squishinessViewModel.squishiness.collectAsStateWithLifecycle()
         val scope = rememberCoroutineScope()
+        // Keep the lambdas passed to the tiles stable so [Tile] can be skipped during
+        // recomposition (the squish value itself is read while drawing, not while composing).
+        val squishinessState = rememberUpdatedState(squishiness)
+        val squishinessProvider = remember { { squishinessState.value } }
+        val textFeedback = remember(textFeedbackViewModel) {
+            textFeedbackViewModel::requestShowFeedback
+        }
 
         val bounceables =
             remember(sizedTiles) { List(sizedTiles.size) { BounceableTileViewModel() } }
@@ -113,8 +128,10 @@ constructor(
             Element(it.tile.spec.toElementKey(), Modifier) {
                 Tile(
                     tile = it.tile,
-                    iconOnly = iconTilesViewModel.isIconTile(it.tile.spec),
-                    squishiness = { squishiness },
+                    // The circular style shows a label under every tile, so no tile is icon only.
+                    iconOnly = !circular && iconTilesViewModel.isIconTile(it.tile.spec),
+                    circular = circular,
+                    squishiness = squishinessProvider,
                     tileHapticsViewModelFactory = tileHapticsViewModelFactory,
                     coroutineScope = scope,
                     bounceableInfo =
@@ -128,7 +145,7 @@ constructor(
                         ),
                     detailsViewModel = detailsViewModel,
                     isVisible = listening,
-                    requestToggleTextFeedback = textFeedbackViewModel::requestShowFeedback,
+                    requestToggleTextFeedback = textFeedback,
                     enableRevealEffect = enableRevealEffect,
                 )
             }
@@ -150,6 +167,10 @@ constructor(
             rememberViewModel(traceName = "InfiniteGridLayout.EditTileGrid") {
                 viewModelFactory.create()
             }
+        // Read the raw setting here (instead of relying on the composition local) so the edit mode
+        // tiles always match the style the grid is laid out with.
+        val editTileStyle by viewModel.tileStyleFlow.collectAsState()
+        val circular = editTileStyle.isCircular
         val columnsViewModel =
             rememberViewModel(traceName = "InfiniteGridLayout.EditTileGrid") {
                 viewModel.columnsWithMediaViewModelFactory.createWithoutMediaTracking()
@@ -207,6 +228,7 @@ constructor(
             snapshotViewModel = snapshotViewModel,
             onStopEditing = onStopEditing,
             topBarActions = actions,
+            circular = circular,
         ) { action ->
             // Opening the dialog doesn't require a snapshot
             if (action != EditAction.ResetGrid) {

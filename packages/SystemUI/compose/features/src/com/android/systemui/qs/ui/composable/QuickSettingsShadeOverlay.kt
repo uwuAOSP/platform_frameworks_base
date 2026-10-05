@@ -42,6 +42,7 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -100,6 +101,7 @@ import com.android.systemui.qs.panels.ui.compose.TileDetails
 import com.android.systemui.qs.panels.ui.compose.TileGrid
 import com.android.systemui.qs.panels.ui.compose.toolbar.Toolbar
 import com.android.systemui.qs.panels.ui.viewmodel.toolbar.ToolbarViewModel
+import com.android.systemui.qs.shared.ui.QuickSettings
 import com.android.systemui.qs.tiles.dialog.AudioDetailsViewModel
 import com.android.systemui.qs.ui.composable.QuickSettingsShade.systemGestureExclusionInShade
 import com.android.systemui.qs.ui.viewmodel.QuickSettingsContainerViewModel
@@ -126,6 +128,7 @@ import dagger.Lazy
 import javax.inject.Inject
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.Flow
+import org.uwuaosp.systemui.qsstyle.rememberQsBrightnessSettings
 
 @SysUISingleton
 class QuickSettingsShadeOverlay
@@ -357,6 +360,13 @@ private fun ContentScope.QuickSettingsLayout(
     modifier: Modifier = Modifier,
 ) {
     val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    // The scene-based overlay is the active QS container on this device. Read the raw style flow
+    // here because the composition local is not guaranteed to reach this isolated overlay scope.
+    val tileStyle by qsContainerViewModel.brightnessSliderViewModel.tileStyleFlow.collectAsState()
+    val circular = tileStyle.isCircular
+    val brightnessSettings = rememberQsBrightnessSettings()
+    val brightnessAtTop = brightnessSettings.sliderAtTop
+    val showBrightnessSlider = brightnessSettings.showSlider != 0
     val switchToNotificationsModifier =
         if (isDualShade) {
             Modifier.switchShadeOnHorizontalSwipe(
@@ -421,25 +431,37 @@ private fun ContentScope.QuickSettingsLayout(
                 VerticalSeparator(QuickSettingsShade.Dimensions.VerticalPadding)
             }
 
-            if (qsContainerViewModel.isBrightnessSliderVisible) {
-                Box(
-                    Modifier.systemGestureExclusionInShade(
-                        enabled = { layoutState.transitionState is TransitionState.Idle }
-                    )
-                ) {
-                    BrightnessSliderContainer(
-                        viewModel = qsContainerViewModel.brightnessSliderViewModel,
-                        containerColors =
-                            ContainerColors(
-                                idleColor = Color.Transparent,
-                                mirrorColor =
-                                    OverlayShade.Colors.panelBackground(isTransparencyEnabled),
-                            ),
-                        modifier = Modifier.fillMaxWidth(),
-                        dimensions = QuickSettingsShade.Dimensions.brightnessSliderDimensions,
-                    )
+            val BrightnessSlider =
+                @Composable {
+                    if (qsContainerViewModel.isBrightnessSliderVisible) {
+                        Element(
+                            key =
+                                if (circular) QuickSettings.Elements.CircularBrightnessSlider
+                                else QuickSettings.Elements.BrightnessSlider,
+                            modifier = Modifier,
+                        ) {
+                            Box(
+                                Modifier.systemGestureExclusionInShade(
+                                    enabled = { layoutState.transitionState is TransitionState.Idle }
+                                )
+                            ) {
+                                BrightnessSliderContainer(
+                                    viewModel = qsContainerViewModel.brightnessSliderViewModel,
+                                    containerColors =
+                                        ContainerColors(
+                                            idleColor = Color.Transparent,
+                                            mirrorColor =
+                                                OverlayShade.Colors.panelBackground(isTransparencyEnabled),
+                                        ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    dimensions = QuickSettingsShade.Dimensions.brightnessSliderDimensions,
+                                )
+                            }
+                        }
+                    }
                 }
-            }
+
+            if (showBrightnessSlider && brightnessAtTop) BrightnessSlider()
 
             if (volumeSliderViewModel != null) {
                 val volumeSliderState by volumeSliderViewModel.slider.collectAsStateWithLifecycle()
@@ -505,6 +527,10 @@ private fun ContentScope.QuickSettingsLayout(
                 modifier = Modifier.fillMaxWidth(),
                 enableRevealEffect = TileRevealFlag.isEnabled,
             )
+            if (showBrightnessSlider && !brightnessAtTop) {
+                VerticalSeparator(QuickSettingsShade.Dimensions.VerticalPadding)
+                BrightnessSlider()
+            }
 
             val buildNumberViewModel =
                 rememberViewModel("QuickSettingsShadeOverlay.BuildNumber") {

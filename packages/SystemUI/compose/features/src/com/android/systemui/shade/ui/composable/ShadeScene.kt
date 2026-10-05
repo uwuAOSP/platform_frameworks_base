@@ -24,12 +24,14 @@ import androidx.compose.foundation.layout.Arrangement.spacedBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -42,6 +44,7 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,6 +55,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
@@ -86,6 +90,8 @@ import com.android.compose.modifiers.height
 import com.android.compose.modifiers.padding
 import com.android.compose.modifiers.thenIf
 import com.android.internal.jank.InteractionJankMonitor
+import com.android.systemui.brightness.ui.compose.BrightnessSliderContainer
+import com.android.systemui.brightness.ui.compose.ContainerColors
 import com.android.systemui.common.ui.compose.windowinsets.CutoutLocation
 import com.android.systemui.common.ui.compose.windowinsets.LocalDisplayCutout
 import com.android.systemui.compose.modifiers.sysuiResTag
@@ -123,6 +129,8 @@ import dagger.Lazy
 import javax.inject.Inject
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.Flow
+import org.uwuaosp.systemui.qsstyle.QsBrightnessSettings
+import org.uwuaosp.systemui.qsstyle.rememberQsBrightnessSettings
 
 object Shade {
     object Elements {
@@ -308,6 +316,13 @@ private fun ContentScope.SingleShade(
         layoutState.isTransitioningBetween(Scenes.Gone, Scenes.Shade) ||
             layoutState.isTransitioningBetween(Scenes.Lockscreen, Scenes.Shade)
     val mediaInRow = viewModel.showMediaInRow
+    val qsContainerViewModel =
+        rememberViewModel(traceName = "ShadeScene.QSContainerViewModel") {
+            viewModel.qsContainerViewModelFactory.create(supportsBrightnessMirroring = true)
+        }
+    val tileStyle by qsContainerViewModel.brightnessSliderViewModel.tileStyleFlow.collectAsState()
+    val circular = tileStyle.isCircular
+    val brightnessSettings = rememberQsBrightnessSettings()
     val notificationStackPadding = dimensionResource(id = R.dimen.notification_side_paddings_single)
 
     val systemBarsPadding = WindowInsets.systemBars.asPaddingValues()
@@ -369,7 +384,16 @@ private fun ContentScope.SingleShade(
                 )
             },
             mediaAndQqsHeader = {
-                val qqsLayoutPaddingBottom = 16.dp
+                val showQqsBrightnessSlider =
+                    circular &&
+                        qsContainerViewModel.isBrightnessSliderVisible &&
+                        brightnessSettings.showSlider == 2
+                val qqsLayoutPaddingBottom =
+                    if (showQqsBrightnessSlider && !brightnessSettings.sliderAtTop) {
+                        0.dp
+                    } else {
+                        16.dp
+                    }
                 val qsHorizontalMargin =
                     shadeHorizontalPadding + dimensionResource(id = R.dimen.qs_horizontal_margin)
                 MediaAndQqsLayout(
@@ -381,7 +405,10 @@ private fun ContentScope.SingleShade(
                                 IntOffset(x = 0, y = down / 2)
                             }
                             .padding(bottom = qqsLayoutPaddingBottom)
-                            .padding(horizontal = qsHorizontalMargin),
+                            .padding(horizontal = qsHorizontalMargin)
+                            .thenIf(!brightnessSettings.sliderAtTop) {
+                                Modifier.padding(top = 16.dp)
+                            },
                     tiles =
                         @Composable {
                             // Because the ShadeScene is always composed, we need to manually tell
@@ -432,6 +459,30 @@ private fun ContentScope.SingleShade(
                         }
                     },
                     mediaInRow = mediaInRow,
+                    brightnessSettings = brightnessSettings,
+                    showBrightnessSlider = showQqsBrightnessSlider,
+                    brightness =
+                        if (showQqsBrightnessSlider) {
+                            {
+                                Element(
+                                    key = QuickSettings.Elements.CircularBrightnessSlider,
+                                    modifier = Modifier.offset(y = (-12).dp),
+                                ) {
+                                    BrightnessSliderContainer(
+                                        viewModel =
+                                            qsContainerViewModel.brightnessSliderViewModel,
+                                        containerColors =
+                                            ContainerColors(
+                                                Color.Transparent,
+                                                ContainerColors.defaultContainerColor,
+                                            ),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
+                            }
+                        } else {
+                            {}
+                        },
                 )
             },
             scrollableScrim = { onContentHeightChanged, isScrimAtRest ->
@@ -481,26 +532,51 @@ private fun MediaAndQqsLayout(
     tiles: @Composable () -> Unit,
     media: @Composable () -> Unit,
     mediaInRow: Boolean,
+    brightnessSettings: QsBrightnessSettings,
+    showBrightnessSlider: Boolean,
+    brightness: @Composable () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val modifierAnimated =
         modifier.animateContentSizeNoClip(MaterialTheme.motionScheme.defaultSpatialSpec())
+    val brightnessAtTop = brightnessSettings.sliderAtTop
     if (mediaInRow) {
-        Row(
-            modifier = modifierAnimated,
-            horizontalArrangement = spacedBy(dimensionResource(R.dimen.qs_tile_margin_vertical)),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(modifier = Modifier.weight(1f)) { tiles() }
-            Box(modifier = Modifier.weight(1f)) { media() }
+        val rowSpacing = dimensionResource(R.dimen.qs_tile_margin_vertical)
+        Column(modifier = modifierAnimated) {
+            if (showBrightnessSlider && brightnessAtTop) {
+                brightness()
+                Spacer(Modifier.height(rowSpacing))
+            }
+            Row(
+                horizontalArrangement = spacedBy(rowSpacing),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(modifier = Modifier.weight(1f)) { tiles() }
+                Box(modifier = Modifier.weight(1f)) { media() }
+            }
+            if (showBrightnessSlider && !brightnessAtTop) brightness()
         }
     } else {
-        Column(modifier = modifierAnimated, verticalArrangement = spacedBy(16.dp)) {
-            tiles()
+        Column(modifier = modifierAnimated, verticalArrangement = spacedBy(QqsRowSpacing)) {
+            if (showBrightnessSlider && !brightnessAtTop) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    tiles()
+                    // Circular QQS keeps the invisible label band inside the tile cells. Group the
+                    // bottom slider with those cells so that no second row gap is inserted, while
+                    // media (when present) still receives the normal row spacing.
+                    brightness()
+                }
+            } else {
+                if (showBrightnessSlider) brightness()
+                tiles()
+            }
             media()
         }
     }
 }
+
+/** Vertical gap between the Quick QS rows (tiles, brightness slider and media). */
+private val QqsRowSpacing = 16.dp
 
 @Composable
 private fun ContentScope.SplitShade(
