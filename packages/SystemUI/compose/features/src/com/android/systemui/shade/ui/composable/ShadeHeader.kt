@@ -199,7 +199,7 @@ fun ContentScope.CollapsedShadeHeader(
                 LocalConfiguration.current.smallestScreenWidthDp >= 600 &&
                 booleanResource(R.bool.config_use_large_screen_shade_header)
         ) {
-            // 合并面板保留大屏头部高度，不能只占状态栏的高度
+            // Keep the large-screen header height in the combined shade.
             max(
                 viewModel.statusBarHeightPx,
                 with(LocalDensity.current) {

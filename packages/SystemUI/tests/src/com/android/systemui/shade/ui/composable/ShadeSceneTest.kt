@@ -262,7 +262,7 @@ class ShadeSceneTest : SysuiTestCase() {
                             .toDp()
                     }
 
-                // 通知沿用头部下方的位置，QS自己的间距只计算一次
+                // Notifications stay below the header; QS top padding is applied once.
                 if (useTabletHeader) {
                     assertThat(header.height.value).isAtLeast(headerHeight.value)
                 }
