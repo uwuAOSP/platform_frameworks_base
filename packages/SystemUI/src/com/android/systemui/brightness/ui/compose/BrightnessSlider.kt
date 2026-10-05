@@ -25,22 +25,31 @@ import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderColors
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.SliderState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -50,7 +59,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
@@ -68,7 +80,10 @@ import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
@@ -123,6 +138,11 @@ fun BrightnessSlider(
     showToast: () -> Unit = {},
     hapticsViewModelFactory: SliderHapticsViewModel.Factory,
     dimensions: BrightnessSliderDimensions = BrightnessSliderDimensions.Default,
+    /**
+     * When true (`Settings.Secure.UWU_QS_STYLE` == 1) the slider is drawn like the reference ROM
+     * brightness bar. The default (`false`) path keeps the original AOSP implementation as is.
+     */
+    circular: Boolean = false,
 ) {
     var value by remember(gammaValue) { mutableIntStateOf(gammaValue) }
     val animatedValue by
@@ -143,7 +163,19 @@ fun BrightnessSlider(
                 SeekableSliderTrackerConfig(),
             )
         }
-    val colors = SystemUISliderColors.Defaults
+    // Circular style: the reference's unfilled track is the *opaque* light surface color
+    // (`?attr/offStateColor` = `@*android:color/surface_light`, i.e. the near-white base surface),
+    // not the translucent `surfaceEffect1` overlay used by the default AOSP slider. Measured on the
+    // device the overlay renders ~(205,215,223) / lum 0.86 over the QS wallpaper, i.e. only +0.12
+    // over the background, while the reference pill is (255,251,255) / lum 0.99.
+    val colors =
+        if (circular) {
+            SystemUISliderColors.Defaults.copy(
+                inactiveTrackColor = MaterialTheme.colorScheme.surface
+            )
+        } else {
+            SystemUISliderColors.Defaults
+        }
 
     // The value state is recreated every time gammaValue changes, so we recreate this derivedState
     // We have to use value as that's the value that changes when the user is dragging (gammaValue
@@ -232,14 +264,35 @@ fun BrightnessSlider(
                 },
         interactionSource = interactionSource,
         thumb = {
-            SliderDefaults.Thumb(
-                interactionSource = interactionSource,
-                enabled = enabled,
-                thumbSize = DpSize(dimensions.thumbWidth, dimensions.thumbHeight),
-                colors = colors,
-            )
+            if (circular) {
+                // Reference slider has no thumb: the round cap of the fill (with the icon in it)
+                // is what the user drags. Keep an invisible, fixed size spacer so the track is
+                // laid out exactly like the default one (the Material3 slider always reserves the
+                // thumb width).
+                Spacer(Modifier.size(dimensions.thumbWidth, dimensions.trackHeight))
+            } else {
+                SliderDefaults.Thumb(
+                    interactionSource = interactionSource,
+                    enabled = enabled,
+                    thumbSize = DpSize(dimensions.thumbWidth, dimensions.thumbHeight),
+                    colors = colors,
+                )
+            }
         },
         track = { sliderState ->
+            if (circular) {
+                CircularSliderTrack(
+                    sliderState = sliderState,
+                    colors = colors,
+                    painter = painter,
+                    enabled = enabled,
+                    iconSize = dimensions.iconSize,
+                    trackHeight = dimensions.trackHeight,
+                )
+                return@Slider
+            }
+
+            // ---- Default (Settings.Secure.UWU_QS_STYLE == 0) implementation, unchanged. ----
             var showIconActive by remember { mutableStateOf(true) }
             val iconActiveAlphaAnimatable = remember {
                 Animatable(
@@ -333,6 +386,119 @@ fun BrightnessSlider(
     }
 }
 
+/**
+ * Track of the circular (`Settings.Secure.UWU_QS_STYLE == 1`) brightness slider.
+ *
+ * Reproduces the visible features of the reference ROM (Android 13 based, Java/XML):
+ * `brightness_progress_drawable.xml` + `brightness_progress_full_drawable.xml`, whose geometry is
+ * driven by `rounded_slider_height` (48dp), `rounded_slider_corner_radius` (24dp),
+ * `rounded_slider_icon_size` (20dp) and `rounded_slider_icon_inset` (14dp).
+ * * the whole bar is a pill (corner radius = half the height);
+ * * the unfilled part uses the inactive track role, the filled part the active track role;
+ * * the fill is never narrower than a full circle (`RoundedCornerProgressDrawable` adds `height /
+ *   2` to the progress width and clamps it to at least the track height);
+ * * the brightness icon is tinted with the active tick role and centered on the leading cap of the
+ *   fill, which puts its edge `radius - iconSize / 2` away from the fill's edge - exactly the
+ *   reference `rounded_slider_icon_inset` (24 - 10 = 14dp);
+ * * there is no separate thumb: the icon inside the cap rides the finger.
+ */
+@Composable
+private fun CircularSliderTrack(
+    sliderState: SliderState,
+    colors: SliderColors,
+    painter: Painter,
+    enabled: Boolean,
+    iconSize: DpSize,
+    trackHeight: Dp,
+) {
+    val activeTrackColor = if (enabled) colors.activeTrackColor else colors.disabledActiveTrackColor
+    val inactiveTrackColor =
+        if (enabled) colors.inactiveTrackColor else colors.disabledInactiveTrackColor
+    val iconColor = if (enabled) colors.activeTickColor else colors.disabledActiveTickColor
+
+    Box(
+        modifier =
+            Modifier.fillMaxWidth().height(trackHeight).drawBehind {
+                val radius = size.height / 2f
+                val iconWidth = iconSize.width.toPx()
+                val iconHeight = iconSize.height.toPx()
+                val rtl = layoutDirection == LayoutDirection.Rtl
+
+                drawRoundRect(
+                    color = inactiveTrackColor,
+                    size = size,
+                    cornerRadius = CornerRadius(radius),
+                )
+
+                // Mirrors RoundedCornerProgressDrawable: width = progress * width + radius,
+                // clamped to [height, width].
+                val progress = size.width * sliderState.coercedValueAsFraction
+                val minFillWidth = (radius * 2f).coerceAtMost(size.width)
+                val fillWidth = (progress + radius).coerceIn(minFillWidth, size.width)
+                val fillLeft = if (rtl) size.width - fillWidth else 0f
+                drawRoundRect(
+                    color = activeTrackColor,
+                    topLeft = Offset(fillLeft, 0f),
+                    size = Size(fillWidth, size.height),
+                    cornerRadius = CornerRadius(radius),
+                )
+
+                // Center of the leading cap of the fill: the icon sits directly under the finger.
+                val iconCenterX = if (rtl) fillLeft + radius else fillLeft + fillWidth - radius
+                translate(
+                    left = iconCenterX - iconWidth / 2f,
+                    top = size.height / 2f - iconHeight / 2f,
+                ) {
+                    with(painter) {
+                        draw(
+                            size = iconSize.toSize(),
+                            colorFilter = ColorFilter.tint(iconColor),
+                            alpha = 1f,
+                        )
+                    }
+                }
+            }
+    )
+}
+
+/**
+ * Auto-brightness toggle of the circular style, matching the reference ROM's right hand button
+ * (AOSP 13 `quick_settings_brightness_dialog.xml` `@id/brightness_icon`): a 48dp circle placed
+ * after the slider, with the `ic_qs_autobrightness` glyph.
+ *
+ * Off uses the light `surface` role with an `onSurface` glyph, on uses `primary` with `onPrimary`
+ * (the same pairing as the reference's `bg_qs_brightness_auto_off` / `_on`).
+ */
+@Composable
+private fun AutoBrightnessButton(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val background =
+        if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
+    val contentColor =
+        if (checked) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+    val description = stringResource(R.string.quick_settings_autobrightness_label)
+    Box(
+        modifier =
+            modifier
+                .size(CircularDimensions.AutoBrightnessButtonSize)
+                .clip(CircleShape)
+                .background(background)
+                .toggleable(value = checked, onValueChange = onCheckedChange, role = Role.Switch)
+                .semantics { contentDescription = description }
+                .sysuiResTag("brightness_auto_button"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_qs_autobrightness),
+            contentDescription = null,
+            tint = contentColor,
+        )
+    }
+}
+
 private fun Modifier.sliderBackground(
     backgroundFrameSize: DpSize,
     backgroundRoundedCorner: Dp,
@@ -390,10 +556,16 @@ fun BrightnessSliderContainer(
         )
 
     val isRestricted = restriction is PolicyRestriction.Restricted
+    // Raw style flow, observed directly so the slider always renders the currently persisted style
+    // (same pattern as InfiniteGridLayout / QuickQuickSettings).
+    val tileStyle by viewModel.tileStyleFlow.collectAsState()
+    val circular = tileStyle.isCircular
+    // The circular style has its own geometry (pill track, no thumb, icon inside the fill).
+    val sliderDimensions = if (circular) BrightnessSliderDimensions.Circular else dimensions
     Box(
         modifier =
             modifier
-                .padding(vertical = { dimensions.verticalPadding.roundToPx() })
+                .padding(vertical = { sliderDimensions.verticalPadding.roundToPx() })
                 .fillMaxWidth()
                 .sysuiResTag("brightness_slider")
     ) {
@@ -418,15 +590,29 @@ fun BrightnessSliderContainer(
             modifier =
                 Modifier.borderOnFocus(
                         color = MaterialTheme.colorScheme.secondary,
-                        cornerSize = CornerSize(SliderTrackRoundedCorner),
+                        cornerSize =
+                            CornerSize(
+                                if (circular) sliderDimensions.trackHeight / 2
+                                else SliderTrackRoundedCorner
+                            ),
                     )
                     .then(if (viewModel.showMirror) Modifier.drawInOverlay() else Modifier)
                     .sliderBackground(
-                        DpSize(dimensions.backgroundFrameWidth, dimensions.backgroundFrameHeight),
-                        dimensions.backgroundRoundedCorner,
+                        DpSize(
+                            sliderDimensions.backgroundFrameWidth,
+                            sliderDimensions.backgroundFrameHeight,
+                        ),
+                        sliderDimensions.backgroundRoundedCorner,
                         containerColor,
                     )
                     .fillMaxWidth()
+                    .thenIf(circular) {
+                        // Circular style reserves the end of the row for the auto-brightness button
+                        // (reference: `layout_marginStart="8dp"` + a 48dp round button).
+                        Modifier.padding(
+                            end = { CircularDimensions.AutoBrightnessButtonTotalWidth.roundToPx() }
+                        )
+                    }
                     .pointerInteropFilter {
                         if (
                             it.actionMasked == MotionEvent.ACTION_UP ||
@@ -435,7 +621,11 @@ fun BrightnessSliderContainer(
                             viewModel.emitBrightnessTouchForFalsing()
                         }
                         false
-                    },
+                    }
+                    // The auto-brightness button is centered in this Box. Center the track the same
+                    // way, so both stay on the same axis even if the container is briefly laid out
+                    // with a different height (for example while the shade expands into QS).
+                    .align(Alignment.CenterStart),
             hapticsViewModelFactory = viewModel.hapticsViewModelFactory,
             overriddenByAppState = overriddenByAppState,
             showToast = {
@@ -444,8 +634,18 @@ fun BrightnessSliderContainer(
                     com.android.internal.R.string.brightness_unable_adjust_msg,
                 )
             },
-            dimensions = dimensions,
+            dimensions = sliderDimensions,
+            circular = circular,
         )
+        if (circular) {
+            // Reference row: [slider] [8dp] [48dp auto-brightness button].
+            val autoBrightnessEnabled by viewModel.isAutoBrightnessEnabled.collectAsState()
+            AutoBrightnessButton(
+                checked = autoBrightnessEnabled,
+                onCheckedChange = viewModel::setAutoBrightnessEnabled,
+                modifier = Modifier.align(Alignment.CenterEnd),
+            )
+        }
     }
 }
 
@@ -480,6 +680,34 @@ data class BrightnessSliderDimensions(
                 backgroundFrameWidth = 10.dp,
                 backgroundFrameHeight = 6.dp,
             )
+
+        /**
+         * Geometry of the circular style (`Settings.Secure.UWU_QS_STYLE == 1`), taken verbatim from
+         * the reference ROM's `rounded_slider_*` dimensions:
+         * * `rounded_slider_height` = 48dp -> [trackHeight];
+         * * `rounded_slider_corner_radius` = 24dp, i.e. half the height, so the track is a pill
+         *   (the container derives it from [trackHeight]);
+         * * `rounded_slider_icon_size` = 20dp -> [iconSize];
+         * * `rounded_slider_icon_inset` = 14dp, which is `corner radius - icon size / 2` and is
+         *   therefore derived by [CircularSliderTrack];
+         * * `rounded_slider_background_padding` = 8dp ->
+         *   [backgroundFrameWidth]/[backgroundFrameHeight];
+         * * `rounded_slider_background_rounded_corner` = 32dp -> [backgroundRoundedCorner].
+         *
+         * [thumbWidth]/[thumbHeight] only reserve layout space: the circular style has no visible
+         * thumb (see [CircularSliderTrack]).
+         */
+        val Circular =
+            BrightnessSliderDimensions(
+                iconSize = DpSize(20.dp, 20.dp),
+                thumbHeight = 48.dp,
+                thumbWidth = 4.dp,
+                trackHeight = 48.dp,
+                verticalPadding = 6.dp,
+                backgroundRoundedCorner = 32.dp,
+                backgroundFrameWidth = 8.dp,
+                backgroundFrameHeight = 8.dp,
+            )
     }
 }
 
@@ -487,6 +715,17 @@ private object InternalDimensions {
     val SliderTrackRoundedCorner = 12.dp
     val IconPadding = 6.dp
     val ThumbTrackGapSize = 6.dp
+}
+
+private object CircularDimensions {
+    /** Reference `bg_qs_brightness_auto_on` = 48x48dp circle (also `rounded_slider_height`). */
+    val AutoBrightnessButtonSize = 48.dp
+
+    /** Reference `quick_settings_brightness_dialog.xml` `android:layout_marginStart="8dp"`. */
+    val AutoBrightnessButtonGap = 8.dp
+
+    /** Horizontal space the button plus its gap take away from the slider. */
+    val AutoBrightnessButtonTotalWidth = AutoBrightnessButtonSize + AutoBrightnessButtonGap
 }
 
 private object AnimationSpecs {

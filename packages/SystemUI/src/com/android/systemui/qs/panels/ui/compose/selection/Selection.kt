@@ -81,6 +81,8 @@ import com.android.systemui.compose.modifiers.sysuiResTag
 import com.android.systemui.qs.flags.QsEditModeFocusFixes
 import com.android.systemui.qs.flags.QsEditModeHoverFixes
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults.InactiveTileCornerRadius
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults.StartPadding
+import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults.ToggleTargetSize
 import com.android.systemui.qs.panels.ui.compose.selection.SelectionDefaults.BADGE_ANGLE_RAD
 import com.android.systemui.qs.panels.ui.compose.selection.SelectionDefaults.BadgeIconSize
 import com.android.systemui.qs.panels.ui.compose.selection.SelectionDefaults.BadgeSize
@@ -106,12 +108,15 @@ import kotlin.math.sin
  * In states:
  * - [TileState.Removable]: removal icon shown in the top end
  * - [TileState.Selected]: pill shaped handle shown on the end border, as well as a colored border
- *   around the content.
+ *   around the content. In the circular style the handle is a dot attached to the circular border
+ *   around the icon.
  * - [TileState.None]: nothing
  *
  * @param tileState the state for the tile decoration
  * @param resizingState the [ResizingState] for the tile
  * @param onClick the callback when the tile decoration is clicked
+ * @param circular whether the uwuAOSP circular style is active. In that style the tile has no pill,
+ *   so the selection border is a circle around the icon instead of a border around the tile.
  */
 @Composable
 fun InteractiveTileContainer(
@@ -120,9 +125,10 @@ fun InteractiveTileContainer(
     modifier: Modifier = Modifier,
     onClick: () -> Unit = {},
     contentDescription: String? = null,
+    circular: Boolean = false,
     content: @Composable BoxScope.() -> Unit = {},
 ) {
-    val transition: Transition<Decoration> = updateTransition(tileState.decoration())
+    val transition: Transition<Decoration> = updateTransition(tileState.decoration(circular))
     val decorationColor by transition.animateColor()
     val decorationAngle by transition.animateAngle()
     val decorationSize by transition.animateSize { it.size }
@@ -134,11 +140,42 @@ fun InteractiveTileContainer(
     val isDraggable = tileState == Selected
     val isClickable = tileState == Selected || tileState == Removable
 
+    // Read here as they are composable; they are only used by the decorations of the circular
+    // style, which are drawn around the circular icon instead of around the whole tile.
+    val toggleTargetSize = ToggleTargetSize
+    val startPadding = StartPadding
+    val decorationPosition: ((width: Int, height: Int) -> Offset)? =
+        if (circular && tileState == Selected) {
+            val toggleTargetSizePx = with(LocalDensity.current) { toggleTargetSize.toPx() }
+            val startPaddingPx = with(LocalDensity.current) { startPadding.toPx() }
+            // The handle sits on the outer edge of the circular selection border.
+            val ringRadiusPx =
+                with(LocalDensity.current) {
+                    toggleTargetSize.toPx() / 2f + SelectionDefaults.SelectedBorderWidth.toPx()
+                }
+            // The type is explicit so this is not parsed as a trailing lambda of the call above.
+            val position: (Int, Int) -> Offset = { width, _ ->
+                circularIconCenter(
+                    resizingState = resizingState,
+                    tileWidth = width.toFloat(),
+                    toggleTargetSizePx = toggleTargetSizePx,
+                    startPaddingPx = startPaddingPx,
+                ) + Offset(ringRadiusPx, 0f)
+            }
+            position
+        } else {
+            null
+        }
+
     Box(
         modifier.resizable(tileState == Selected, resizingState).selectionBorder(
             selectionColor = MaterialTheme.colorScheme.primary,
             selectionBorderWidth = SelectedBorderWidth,
             cornerRadius = InactiveTileCornerRadius,
+            circular = circular,
+            resizingState = resizingState,
+            toggleTargetSize = toggleTargetSize,
+            startPadding = startPadding,
         ) {
             selectionBorderAlpha
         }
@@ -149,14 +186,15 @@ fun InteractiveTileContainer(
          * We need to hide the decoration if there is none this prevents the decoration from
          * blocking a hover/click of the tile
          */
-        if (!QsEditModeHoverFixes.isEnabled || tileState.decoration() !is NoDecoration) {
+        if (!QsEditModeHoverFixes.isEnabled || tileState.decoration(circular) !is NoDecoration) {
             MinimumInteractiveSizeComponent(
                 angle = { decorationAngle },
                 offset = { decorationOffset },
+                positionOverride = decorationPosition,
                 excludeSystemGesture = isIdle && isDraggable,
                 isClickable = isClickable,
                 onClick = onClick,
-                rippleRadius = tileState.decoration().rippleRadius,
+                rippleRadius = tileState.decoration(circular).rippleRadius,
                 modifier = Modifier.sysuiResTag("EditTileDecoration"),
             ) {
                 Box(
@@ -217,22 +255,79 @@ private fun Modifier.selectionBorder(
     selectionColor: Color,
     selectionBorderWidth: Dp,
     cornerRadius: Dp,
+    circular: Boolean,
+    resizingState: ResizingState,
+    toggleTargetSize: Dp,
+    startPadding: Dp,
     selectionAlpha: () -> Float = { 0f },
 ): Modifier {
     return drawWithContent {
         drawContent()
 
-        // Draw the border on the inside of the tile
         val borderWidth = selectionBorderWidth.toPx()
-        drawRoundRect(
-            SolidColor(selectionColor),
-            cornerRadius = CornerRadius(cornerRadius.toPx()),
-            topLeft = Offset(borderWidth / 2, borderWidth / 2),
-            size = Size(size.width - borderWidth, size.height - borderWidth),
-            style = Stroke(borderWidth),
-            alpha = selectionAlpha(),
-        )
+        val alpha = selectionAlpha()
+        if (circular) {
+            // The circular style has no pill: the border hugs the circular icon instead of
+            // surrounding the whole tile.
+            val toggleTargetSizePx = toggleTargetSize.toPx()
+            drawCircle(
+                color = selectionColor,
+                radius = toggleTargetSizePx / 2f + borderWidth / 2f,
+                center =
+                    circularIconCenter(
+                        resizingState = resizingState,
+                        tileWidth = size.width,
+                        toggleTargetSizePx = toggleTargetSizePx,
+                        startPaddingPx = startPadding.toPx(),
+                    ),
+                alpha = alpha,
+                style = Stroke(borderWidth),
+            )
+        } else {
+            // Draw the border on the inside of the tile
+            drawRoundRect(
+                SolidColor(selectionColor),
+                cornerRadius = CornerRadius(cornerRadius.toPx()),
+                topLeft = Offset(borderWidth / 2, borderWidth / 2),
+                size = Size(size.width - borderWidth, size.height - borderWidth),
+                style = Stroke(borderWidth),
+                alpha = alpha,
+            )
+        }
     }
+}
+
+/**
+ * Position, in pixels, of the center of the circular icon of an edit tile that is [tileWidth] wide.
+ *
+ * The circular tile content is a [ToggleTargetSize] sized icon followed by the label, laid out at
+ * the position computed by `EditTile`'s layout: the icon is centered in a grid cell while the tile
+ * is icon sized, and moves towards the start padding while the tile is resized to a large tile.
+ * This mirrors that placement so the decorations of the circular style stay attached to the icon
+ * (the tile itself has no pill to attach them to).
+ */
+private fun circularIconCenter(
+    resizingState: ResizingState,
+    tileWidth: Float,
+    toggleTargetSizePx: Float,
+    startPaddingPx: Float,
+): Offset {
+    val progress = resizingState.progress()
+    // The resize anchors hold the width of a single grid cell.
+    val iconAnchor = resizingState.bounds.first ?: tileWidth
+    val basePadding = (iconAnchor - toggleTargetSizePx) / 2f - startPaddingPx
+    val horizontalPadding =
+        if (progress == 0f) {
+            (tileWidth - toggleTargetSizePx) / 2f - startPaddingPx
+        } else {
+            basePadding * (1f - progress)
+        }
+    // The circular content (icon, its gap and the single label line) fills the tile height, so the
+    // icon is at the top of the tile.
+    return Offset(
+        x = horizontalPadding + startPaddingPx + toggleTargetSizePx / 2f,
+        y = toggleTargetSizePx / 2f,
+    )
 }
 
 /**
@@ -286,6 +381,12 @@ private fun MinimumInteractiveSizeComponent(
     angle: () -> Float,
     offset: () -> Offset,
     modifier: Modifier = Modifier,
+    /**
+     * Position of the center of this component, in the parent's coordinates. When null, the
+     * component is placed on the border of the parent, rotated by [angle] and displaced by
+     * [offset].
+     */
+    positionOverride: ((width: Int, height: Int) -> Offset)? = null,
     excludeSystemGesture: Boolean = false,
     isClickable: Boolean,
     onClick: () -> Unit = {},
@@ -306,9 +407,14 @@ private fun MinimumInteractiveSizeComponent(
                     val size = minTouchTargetSize.roundToPx()
                     val placeable = measurable.measure(Constraints.fixed(size, size))
                     layout(placeable.width, placeable.height) {
-                        val radius = constraints.maxHeight / 2f
-                        val rotationCenter = Offset(constraints.maxWidth - radius, radius)
-                        val position = offsetForAngle(angle(), radius, rotationCenter) + offset()
+                        val position =
+                            positionOverride?.invoke(constraints.maxWidth, constraints.maxHeight)
+                                ?: run {
+                                    val radius = constraints.maxHeight / 2f
+                                    val rotationCenter =
+                                        Offset(constraints.maxWidth - radius, radius)
+                                    offsetForAngle(angle(), radius, rotationCenter) + offset()
+                                }
                         placeable.placeRelative(
                             position.x.roundToInt() - placeable.width / 2,
                             position.y.roundToInt() - placeable.height / 2,
@@ -468,10 +574,10 @@ private object SelectionDefaults {
 
     @Composable
     @ReadOnlyComposable
-    fun TileState.decoration(): Decoration {
+    fun TileState.decoration(circular: Boolean = false): Decoration {
         return when (this) {
             Removable -> removalBadge()
-            Selected -> resizingHandle()
+            Selected -> resizingHandle(circular)
             Placeable -> placeable()
             New,
             None,
@@ -497,13 +603,20 @@ private object SelectionDefaults {
 
     @Composable
     @ReadOnlyComposable
-    fun resizingHandle(): VisibleDecoration {
+    fun resizingHandle(circular: Boolean): VisibleDecoration {
         return with(LocalDensity.current) {
             VisibleDecoration(
                 iconAlpha = 0f,
                 borderAlpha = 1f,
                 color = MaterialTheme.colorScheme.primary,
-                size = Size(ResizingPillWidth.toPx(), ResizingPillHeight.toPx()),
+                size =
+                    if (circular) {
+                        // The circular style has no pill: the handle is a dot placed on the
+                        // circular selection border of the icon.
+                        Size(ResizingPillWidth.toPx())
+                    } else {
+                        Size(ResizingPillWidth.toPx(), ResizingPillHeight.toPx())
+                    },
                 rippleRadius = ResizingPillRippleRadius,
                 angle = RESIZING_PILL_ANGLE_RAD,
                 offset = Offset(-SelectedBorderWidth.toPx(), 0f),

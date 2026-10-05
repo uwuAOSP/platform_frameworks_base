@@ -41,6 +41,7 @@ import com.android.systemui.shade.domain.interactor.shadeStatusBarComponentsInte
 import com.android.systemui.shade.largeScreenHeaderHelper
 import com.android.systemui.shade.transition.largeScreenShadeInterpolator
 import com.android.systemui.statusbar.sysuiStatusBarStateController
+import org.uwuaosp.systemui.qsstyle.qsStyleRepository
 
 val Kosmos.qsFragmentComposeViewModelFactory by
     Kosmos.Fixture {
@@ -49,30 +50,31 @@ val Kosmos.qsFragmentComposeViewModelFactory by
                 lifecycleScope: LifecycleCoroutineScope
             ): QSFragmentComposeViewModel {
                 return QSFragmentComposeViewModel(
-                    quickSettingsContainerViewModelFactory,
-                    mainResources,
-                    quickQuickSettingsViewModelFactory,
-                    footerActionsViewModelFactory,
-                    footerActionsController,
-                    sysuiStatusBarStateController,
-                    deviceEntryBypassInteractor,
-                    keyguardTransitionInteractor,
-                    largeScreenShadeInterpolator,
-                    configurationInteractor,
-                    largeScreenHeaderHelper,
-                    tileSquishinessInteractor,
-                    falsingInteractor,
-                    inFirstPageViewModel,
-                    logcatTableLogBuffer(this@Fixture),
-                    mediaInRowInLandscapeViewModelFactory,
-                    qqsMediaHost,
-                    qsMediaHost,
-                    usingMediaInComposeFragment,
-                    uiEventLoggerFake,
-                    lifecycleScope,
-                    mediaCarouselInteractor,
-                    mediaViewModelFactory,
-                    shadeStatusBarComponentsInteractor,
+                    containerViewModelFactory = quickSettingsContainerViewModelFactory,
+                    resources = mainResources,
+                    quickQuickSettingsViewModelFactory = quickQuickSettingsViewModelFactory,
+                    footerActionsViewModelFactory = footerActionsViewModelFactory,
+                    footerActionsController = footerActionsController,
+                    sysuiStatusBarStateController = sysuiStatusBarStateController,
+                    deviceEntryBypassInteractor = deviceEntryBypassInteractor,
+                    keyguardTransitionInteractor = keyguardTransitionInteractor,
+                    largeScreenShadeInterpolator = largeScreenShadeInterpolator,
+                    configurationInteractor = configurationInteractor,
+                    largeScreenHeaderHelper = largeScreenHeaderHelper,
+                    squishinessInteractor = tileSquishinessInteractor,
+                    falsingInteractor = falsingInteractor,
+                    inFirstPageViewModel = inFirstPageViewModel,
+                    tableLogBuffer = logcatTableLogBuffer(this@Fixture),
+                    mediaInRowInLandscapeViewModelFactory = mediaInRowInLandscapeViewModelFactory,
+                    qqsMediaHost = qqsMediaHost,
+                    qsMediaHost = qsMediaHost,
+                    usingMedia = usingMediaInComposeFragment,
+                    uiEventLogger = uiEventLoggerFake,
+                    lifecycleScope = lifecycleScope,
+                    mediaCarouselInteractor = mediaCarouselInteractor,
+                    mediaViewModelFactory = mediaViewModelFactory,
+                    shadeStatusBarComponentsInteractor = shadeStatusBarComponentsInteractor,
+                    qsStyleRepository = qsStyleRepository,
                 )
             }
         }

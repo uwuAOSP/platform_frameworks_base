@@ -91,6 +91,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.StateFlow
+import org.uwuaosp.systemui.qsstyle.QSStyleRepository
+import org.uwuaosp.systemui.qsstyle.QSTileStyle
 
 class QSFragmentComposeViewModel
 @AssistedInject
@@ -119,7 +122,11 @@ constructor(
     private val mediaCarouselInteractor: MediaCarouselInteractor,
     val mediaViewModelFactory: MediaViewModel.Factory,
     shadeStatusBarComponentsInteractor: ShadeStatusBarComponentsInteractor,
+    qsStyleRepository: QSStyleRepository,
 ) : Dumpable, ExclusiveActivatable() {
+
+    /** Active tile style, observed directly by the QS composition. */
+    val tileStyle: StateFlow<QSTileStyle> = qsStyleRepository.style
 
     val containerViewModel = containerViewModelFactory.create(supportsBrightnessMirroring = true)
     val quickQuickSettingsViewModel = quickQuickSettingsViewModelFactory.create()

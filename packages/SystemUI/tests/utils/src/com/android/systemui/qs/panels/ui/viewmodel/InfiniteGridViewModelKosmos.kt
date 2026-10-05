@@ -18,18 +18,20 @@ package com.android.systemui.qs.panels.ui.viewmodel
 
 import com.android.systemui.kosmos.Kosmos
 import com.android.systemui.qs.panels.ui.dialog.qsResetDialogDelegateFactoryKosmos
+import org.uwuaosp.systemui.qsstyle.qsStyleRepository
 
 val Kosmos.infiniteGridViewModelFactory by
     Kosmos.Fixture {
         object : InfiniteGridViewModel.Factory {
             override fun create(): InfiniteGridViewModel {
                 return InfiniteGridViewModel(
-                    dynamicIconTilesViewModelFactory,
-                    qsColumnsViewModelFactory,
-                    tileSquishinessViewModel,
-                    infiniteGridSnapshotViewModelFactory,
-                    qsResetDialogDelegateFactoryKosmos,
-                    editTopBarActionsViewModelFactory,
+                    dynamicIconTilesViewModelFactory = dynamicIconTilesViewModelFactory,
+                    columnsWithMediaViewModelFactory = qsColumnsViewModelFactory,
+                    squishinessViewModel = tileSquishinessViewModel,
+                    snapshotViewModelFactory = infiniteGridSnapshotViewModelFactory,
+                    resetDialogDelegateFactory = qsResetDialogDelegateFactoryKosmos,
+                    editTopBarActionsViewModelFactory = editTopBarActionsViewModelFactory,
+                    qsStyleRepository = qsStyleRepository,
                 )
             }
         }

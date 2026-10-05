@@ -33,6 +33,8 @@ interface GridLayout {
      * @param listening can be used to compose the grid but limit when tiles should be listening. It
      *   should be a function tracking a snapshot state.
      * @param enableRevealEffect If `true`, the tiles will animate using the reveal animation.
+     * @param showEditButton Whether the layout should render its own edit (pencil) button. The
+     *   circular style hosts that button in the QS header row instead.
      */
     @Composable
     fun ContentScope.TileGrid(
@@ -40,6 +42,7 @@ interface GridLayout {
         modifier: Modifier,
         listening: () -> Boolean,
         enableRevealEffect: Boolean,
+        showEditButton: Boolean = true,
     )
 
     @Composable

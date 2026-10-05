@@ -75,9 +75,24 @@ data class TileUiState(
     val handlesToggleClick: Boolean,
     val sideDrawable: Drawable?,
     val accessibilityUiState: AccessibilityUiState,
+    /**
+     * Whether the tile expands into a details/dialog view.
+     *
+     * This is [QSTile.AdapterState.forceExpandIcon], which tiles declare through
+     * `QSTileState.SideViewIcon.Chevron` and which is shown as the small expand chevron next to the
+     * tile label. Plain [QSTile.State]s don't carry the information, so it stays `false` for them.
+     */
+    val forceExpandIcon: Boolean = false,
 ) {
     val isToggleable: Boolean
         get() = accessibilityUiState.toggleableState != null
+
+    /**
+     * Whether the small expand chevron should be drawn next to the tile label. Dual target tiles
+     * expand on main click as well, so they get one too.
+     */
+    val showExpandChevron: Boolean
+        get() = forceExpandIcon || handlesToggleClick
 }
 
 data class AccessibilityUiState(
@@ -139,6 +154,7 @@ fun QSTile.State.toUiState(resources: Resources): TileUiState {
         sideDrawable = sideViewCustomDrawable,
         // disable by policy is STATE_INACTIVE that looks like STATE_UNAVAILABLE
         handlesMainClick = state != Tile.STATE_UNAVAILABLE,
+        forceExpandIcon = (this as? QSTile.AdapterState)?.forceExpandIcon == true,
         accessibilityUiState =
             AccessibilityUiState(
                 contentDescription?.toString() ?: label?.toString() ?: "",

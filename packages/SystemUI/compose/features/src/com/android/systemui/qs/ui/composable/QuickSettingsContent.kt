@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +48,7 @@ import com.android.systemui.qs.shared.ui.QuickSettings.Elements
 import com.android.systemui.qs.ui.viewmodel.QuickSettingsContainerViewModel
 import com.android.systemui.res.R
 import kotlinx.coroutines.flow.filterNotNull
+import org.uwuaosp.systemui.qsstyle.rememberQsBrightnessSettings
 
 @Composable
 fun ContentScope.QuickSettingsContent(
@@ -55,6 +57,8 @@ fun ContentScope.QuickSettingsContent(
     modifier: Modifier = Modifier,
     mediaSquishiness: () -> Float = { 1f },
 ) {
+    val tileStyle by viewModel.brightnessSliderViewModel.tileStyleFlow.collectAsState()
+    val circular = tileStyle.isCircular
     QuickSettingsPanelLayout(
         brightness =
             @Composable {
@@ -65,7 +69,12 @@ fun ContentScope.QuickSettingsContent(
                             .filterNotNull()
                             .collect { isBrightnessSliderInteractable = it >= .5f }
                     }
-                    Element(modifier = Modifier, key = Elements.BrightnessSlider) {
+                    Element(
+                        modifier = Modifier,
+                        key =
+                            if (circular) Elements.CircularBrightnessSlider
+                            else Elements.BrightnessSlider,
+                    ) {
                         BrightnessSliderContainer(
                             viewModel.brightnessSliderViewModel,
                             containerColors =
@@ -100,6 +109,8 @@ fun ContentScope.QuickSettingsContent(
                         viewModel.tileGridViewModel,
                         listening = { listening },
                         modifier = Modifier.element(Elements.QuickSettingsTiles),
+                        // The circular style hosts the edit button in the QS header row.
+                        showEditButton = !circular,
                     )
                 }
             },
@@ -139,13 +150,17 @@ private fun QuickSettingsPanelLayout(
     mediaInRow: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val brightnessSettings = rememberQsBrightnessSettings()
+    val sliderAtTop = brightnessSettings.sliderAtTop
+    val showSlider = brightnessSettings.showSlider
+
     if (mediaInRow) {
         Column(
             verticalArrangement = spacedBy(QuickSettingsShade.Dimensions.VerticalPadding),
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = modifier,
         ) {
-            brightness()
+            if (showSlider != 0 && sliderAtTop) brightness()
             Row(
                 horizontalArrangement = spacedBy(QuickSettingsShade.Dimensions.HorizontalPadding),
                 verticalAlignment = Alignment.CenterVertically,
@@ -153,6 +168,7 @@ private fun QuickSettingsPanelLayout(
                 Box(modifier = Modifier.weight(1f)) { tiles() }
                 Box(modifier = Modifier.weight(1f)) { media() }
             }
+            if (showSlider != 0 && !sliderAtTop) brightness()
         }
     } else {
         Column(
@@ -160,8 +176,9 @@ private fun QuickSettingsPanelLayout(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = modifier,
         ) {
-            brightness()
+            if (showSlider != 0 && sliderAtTop) brightness()
             tiles()
+            if (showSlider != 0 && !sliderAtTop) brightness()
             media()
         }
     }
