@@ -18681,6 +18681,10 @@ public final class Settings {
         @Readable
         public static final String ANGLE_GL_DRIVER_ALL_ANGLE = "angle_gl_driver_all_angle";
 
+        /** @hide */
+        @Readable
+        public static final String ANGLE_ALLOWLIST_ENABLED = "angle_allowlist_enabled";
+
         /**
          * List of PKGs that have an OpenGL driver selected
          * @hide

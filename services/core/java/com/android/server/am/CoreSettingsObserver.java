@@ -121,6 +121,8 @@ class CoreSettingsObserver extends ContentObserver {
         sGlobalSettingToTypeMap.put(
                 Settings.Global.ANGLE_GL_DRIVER_ALL_ANGLE, int.class);
         sGlobalSettingToTypeMap.put(
+                Settings.Global.ANGLE_ALLOWLIST_ENABLED, int.class);
+        sGlobalSettingToTypeMap.put(
                 Settings.Global.ANGLE_GL_DRIVER_SELECTION_PKGS, String.class);
         sGlobalSettingToTypeMap.put(
                 Settings.Global.ANGLE_GL_DRIVER_SELECTION_VALUES, String.class);

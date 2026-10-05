@@ -485,7 +485,14 @@ public class GraphicsEnvironment {
         if (DEBUG) {
             Log.v(TAG, "ANGLE allowlist from config: " + allowListPackageList);
         }
+        final int angleAllowlistEnabled = bundle != null
+                ? bundle.getInt(Settings.Global.ANGLE_ALLOWLIST_ENABLED, 0)
+                : Settings.Global.getInt(contentResolver,
+                        Settings.Global.ANGLE_ALLOWLIST_ENABLED, 0);
         for (String allowedPackage : angleAllowListPackages) {
+            if (angleAllowlistEnabled != 1) {
+                break;
+            }
             if (allowedPackage.equals(packageName)) {
                 Log.v(
                         TAG,
