@@ -96,6 +96,8 @@ sealed class OngoingActivityChipModel {
          * a single chip.
          */
         val instanceId: InstanceId? = null,
+        /** Whether this activity represents navigation, including dedicated navigation forwarders. */
+        val isNavigationActivity: Boolean = false,
     ) : OngoingActivityChipModel() {
         init {
             if (content == Content.IconOnly && icon == null) {

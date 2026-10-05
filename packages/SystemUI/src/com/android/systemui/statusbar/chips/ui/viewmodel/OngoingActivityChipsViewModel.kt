@@ -257,6 +257,19 @@ constructor(
             }
             .stateIn(scope, SharingStarted.Lazily, MultipleOngoingActivityChipsModel())
 
+    /**
+     * Ranked/refined activities before row-specific content truncation, for independent renderers.
+     * The native [chips] stream and its presentation rules are unchanged.
+     */
+    val presentationChips: StateFlow<MultipleOngoingActivityChipsModel> =
+        incomingChipBundle
+            .map { bundle ->
+                chipsRefiners.fold(rankChips(bundle)) { currentOutput, refiner ->
+                    refiner.transform(currentOutput)
+                }
+            }
+            .stateIn(scope, SharingStarted.Lazily, MultipleOngoingActivityChipsModel())
+
     private val activeChips = chips.map { it.active }
 
     /** Stores the latest on-screen bounds for each of the chips. */

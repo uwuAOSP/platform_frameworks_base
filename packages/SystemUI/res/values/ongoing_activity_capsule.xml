@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    SPDX-FileCopyrightText: The uwuAOSP Project
+    SPDX-License-Identifier: Apache-2.0
+-->
+<resources>
+    <dimen name="ongoing_activity_capsule_fallback_height">24dp</dimen>
+    <!-- ic_screenrecord occupies 800 of its 960 viewport units: 960 / 800. -->
+    <fraction name="ongoing_activity_capsule_screenrecord_icon_scale">120%</fraction>
+    <!-- Reject wide notches as camera attachments; the cutout remains an obstacle. -->
+    <fraction name="ongoing_activity_capsule_max_camera_aspect_ratio">200%</fraction>
+</resources>

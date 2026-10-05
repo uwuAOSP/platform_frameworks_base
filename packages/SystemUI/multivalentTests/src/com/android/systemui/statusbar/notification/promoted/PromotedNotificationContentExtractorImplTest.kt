@@ -85,6 +85,18 @@ class PromotedNotificationContentExtractorImplTest : SysuiTestCase() {
         }
 
     @Test
+    fun shouldExtract_navigationForwarder_withoutPromotionOrOngoingFlag() =
+        kosmos.runTest {
+            val entry = createEntry(promoted = false, packageName = "com.oplus.pantanal.ums") {
+                setContentTitle(TEST_CONTENT_TITLE)
+                setContentText(TEST_CONTENT_TEXT)
+            }
+            assertThat(entry.sbn.notification.flags and Notification.FLAG_ONGOING_EVENT).isEqualTo(0)
+            val content = requireContent(entry)
+            assertThat(content.privateVersion.text?.toString()).isEqualTo(TEST_CONTENT_TEXT)
+        }
+
+    @Test
     fun extractsContent_commonFields() =
         kosmos.runTest {
             val entry = createEntry {
@@ -802,6 +814,7 @@ class PromotedNotificationContentExtractorImplTest : SysuiTestCase() {
 
     private fun Kosmos.createEntry(
         promoted: Boolean = true,
+        packageName: String = "com.android.systemui",
         builderBlock: Notification.Builder.() -> Unit = {},
     ): NotificationEntry {
         val notif =
@@ -818,7 +831,7 @@ class PromotedNotificationContentExtractorImplTest : SysuiTestCase() {
             notif.creationTime = systemClock.currentTimeMillis()
         }
         return NotificationEntryBuilder()
-            .setPkg("com.android.systemui") // use a real package name, since we're fetching icons
+            .setPkg(packageName)
             .setNotification(notif)
             .build()
     }

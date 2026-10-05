@@ -55,7 +55,7 @@ constructor(
         combine(canShowHeadline, ongoingActivityChipsViewModel.chips, ::Pair).map {
             (canShowHeadline, chips) ->
             if (canShowHeadline) {
-                chips.active.map {
+                chips.active.filterNot { it.isHidden }.map {
                     HeadlineItemImpl(
                         key = HeadlineItemKey(it.key),
                         startContents = it.startContents(),

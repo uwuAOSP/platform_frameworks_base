@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.MutableIntState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +66,15 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.android.systemui.headline.ui.compose.Headline
+import com.android.systemui.headline.ui.compose.drawWithHeadlineScrim
+import com.android.systemui.headline.ui.viewmodel.HeadlineViewModel
+import com.android.systemui.initOnBackPressedDispatcherOwner
+import com.android.systemui.statusbar.chips.ui.compose.OngoingActivityChips
+import com.android.systemui.statusbar.notification.shared.StatusBarHeadline
+import org.uwuaosp.systemui.capsule.CapsuleStatusBarIntegration
+import org.uwuaosp.systemui.capsule.CapsuleStatusBarHost
+import org.uwuaosp.systemui.capsule.addOngoingActivityCapsule
 import com.android.compose.modifiers.thenIf
 import com.android.compose.theme.PlatformTheme
 import com.android.compose.theme.colorAttr
@@ -79,10 +89,6 @@ import com.android.systemui.compose.modifiers.sysUiResTagContainer
 import com.android.systemui.compose.modifiers.sysuiResTag
 import com.android.systemui.display.dagger.SystemUIDisplaySubcomponent.DisplayAware
 import com.android.systemui.display.dagger.SystemUIDisplaySubcomponent.PerDisplaySingleton
-import com.android.systemui.headline.ui.compose.Headline
-import com.android.systemui.headline.ui.compose.drawWithHeadlineScrim
-import com.android.systemui.headline.ui.viewmodel.HeadlineViewModel
-import com.android.systemui.initOnBackPressedDispatcherOwner
 import com.android.systemui.lifecycle.WindowLifecycleState
 import com.android.systemui.lifecycle.rememberViewModel
 import com.android.systemui.lifecycle.repeatWhenAttached
@@ -92,7 +98,6 @@ import com.android.systemui.res.R
 import com.android.systemui.scene.ui.view.WindowRootView
 import com.android.systemui.shade.ui.composable.VariableDayDate
 import com.android.systemui.statusbar.StatusBarAlwaysUseRegionSampling
-import com.android.systemui.statusbar.chips.ui.compose.OngoingActivityChips
 import com.android.systemui.statusbar.core.NewStatusBarIcons
 import com.android.systemui.statusbar.core.StatusBarEventForwardingModernization
 import com.android.systemui.statusbar.core.StatusBarForDesktop
@@ -101,7 +106,6 @@ import com.android.systemui.statusbar.layout.ui.viewmodel.AppHandlesViewModel
 import com.android.systemui.statusbar.notification.icon.ui.viewbinder.ConnectedDisplaysStatusBarNotificationIconViewStore
 import com.android.systemui.statusbar.notification.icon.ui.viewbinder.NotificationIconContainerStatusBarViewBinder
 import com.android.systemui.statusbar.notification.icon.ui.viewbinder.NotificationIconContainerViewBinder
-import com.android.systemui.statusbar.notification.shared.StatusBarHeadline
 import com.android.systemui.statusbar.phone.NotificationIconContainer
 import com.android.systemui.statusbar.phone.PhoneStatusBarView
 import com.android.systemui.statusbar.phone.StatusBarLocation
@@ -224,8 +228,9 @@ fun StatusBarRoot(
         rememberViewModel("AppHandleBounds") {
             statusBarViewModel.appHandlesViewModelFactory.create(displayId)
         }
+    val useCapsule = CapsuleStatusBarIntegration.isEnabled(statusBarViewModel)
     val headlineViewModel =
-        if (StatusBarHeadline.isEnabled) {
+        if (StatusBarHeadline.isEnabled && !useCapsule) {
             rememberViewModel("HeadlineViewModel") { headlineViewModelFactory.create() }
         } else {
             null
@@ -260,7 +265,10 @@ fun StatusBarRoot(
             factory = { context ->
                 val inflater = LayoutInflater.from(context)
                 val phoneStatusBarView =
-                    inflater.inflate(R.layout.status_bar, parent, false) as PhoneStatusBarView
+                    inflater.inflate(
+                        if (useCapsule) R.layout.uwu_camera_capsule_status_bar else R.layout.status_bar,
+                        parent, false,
+                    ) as PhoneStatusBarView
 
                 addStartSideComposable(
                     phoneStatusBarView = phoneStatusBarView,
@@ -438,29 +446,44 @@ private fun addStartSideComposable(
 
                 if (ClockModernization.isEnabled) {
                     clockView.visibility = View.GONE
-                    WithAdaptiveTint(
-                        isDarkProvider = { bounds ->
-                            statusBarViewModel.areaDark.isDarkTheme(bounds)
+                    val clockVisibility =
+                        if (CapsuleStatusBarIntegration.isEnabled(statusBarViewModel)) {
+                            (statusBarViewModel as CapsuleStatusBarHost).capsuleState.isClockVisible.collectAsState(
+                            initial = com.android.systemui.statusbar.pipeline.shared.ui.model.VisibilityModel(
+                                View.INVISIBLE,
+                                false,
+                            )
+                            ).value
+                        } else {
+                            com.android.systemui.statusbar.pipeline.shared.ui.model.VisibilityModel(
+                                View.VISIBLE, false,
+                            )
                         }
-                    ) { tint ->
-                        Clock(
-                            clockViewModel = checkNotNull(clockViewModel),
-                            textColor = tint,
-                            modifier =
-                                Modifier.padding(end = 2.dp)
-                                    .wrapContentSize()
-                                    .onGloballyPositioned { coordinates ->
-                                        val boundsInWindow = coordinates.boundsInWindow()
-                                        val bounds =
-                                            Rect(
-                                                boundsInWindow.left.toInt(),
-                                                boundsInWindow.top.toInt(),
-                                                boundsInWindow.right.toInt(),
-                                                boundsInWindow.bottom.toInt(),
-                                            )
-                                        statusBarBoundsViewModel.updateComposeClockBounds(bounds)
-                                    },
-                        )
+                    if (clockVisibility.visibility == View.VISIBLE) {
+                        WithAdaptiveTint(
+                            isDarkProvider = { bounds ->
+                                statusBarViewModel.areaDark.isDarkTheme(bounds)
+                            }
+                        ) { tint ->
+                            Clock(
+                                clockViewModel = checkNotNull(clockViewModel),
+                                textColor = tint,
+                                modifier =
+                                    Modifier.padding(end = 2.dp)
+                                        .wrapContentSize()
+                                        .onGloballyPositioned { coordinates ->
+                                            val boundsInWindow = coordinates.boundsInWindow()
+                                            val bounds =
+                                                Rect(
+                                                    boundsInWindow.left.toInt(),
+                                                    boundsInWindow.top.toInt(),
+                                                    boundsInWindow.right.toInt(),
+                                                    boundsInWindow.bottom.toInt(),
+                                                )
+                                            statusBarBoundsViewModel.updateComposeClockBounds(bounds)
+                                        },
+                            )
+                        }
                     }
                 }
 
@@ -486,40 +509,33 @@ private fun addStartSideComposable(
                     )
                 }
 
-                val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
-                val density = context.resources.displayMetrics.density
-
-                val chipsMaxWidth: Dp =
-                    remember(
+                if (!CapsuleStatusBarIntegration.isEnabled(statusBarViewModel)) {
+                    val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+                    val density = context.resources.displayMetrics.density
+                    val chipsMaxWidth: Dp = remember(
                         appHandlesViewModel.appHandleBounds,
                         statusBarBoundsViewModel.startSideContainerBounds,
                         statusBarBoundsViewModel.dateBounds,
                         statusBarBoundsViewModel.clockBounds,
-                        isRtl,
-                        density,
+                        isRtl, density,
                     ) {
                         chipsMaxWidth(
                             appHandles = appHandlesViewModel.appHandleBounds,
-                            startSideContainerBounds =
-                                statusBarBoundsViewModel.startSideContainerBounds,
+                            startSideContainerBounds = statusBarBoundsViewModel.startSideContainerBounds,
                             dateBounds = statusBarBoundsViewModel.dateBounds,
                             clockBounds = statusBarBoundsViewModel.clockBounds,
-                            isRtl = isRtl,
-                            density = density,
+                            isRtl = isRtl, density = density,
                         )
                     }
-
-                val chipsVisibilityModel = statusBarViewModel.ongoingActivityChips
-                if (chipsVisibilityModel.areChipsAllowed) {
-                    OngoingActivityChips(
-                        chips = chipsVisibilityModel.chips,
-                        iconViewStore = iconViewStore,
-                        onChipBoundsChanged = statusBarViewModel::onChipBoundsChanged,
-                        // TODO(b/393581408): Now that we always enforce a max width on the chips,
-                        //  we should be able to convert the chips to a LazyRow and get some
-                        //  animations for free.
-                        modifier = Modifier.sysUiResTagContainer().widthIn(max = chipsMaxWidth),
-                    )
+                    val chipsVisibilityModel = statusBarViewModel.ongoingActivityChips
+                    if (chipsVisibilityModel.areChipsAllowed) {
+                        OngoingActivityChips(
+                            chips = chipsVisibilityModel.chips,
+                            iconViewStore = iconViewStore,
+                            onChipBoundsChanged = statusBarViewModel::onChipBoundsChanged,
+                            modifier = Modifier.sysUiResTagContainer().widthIn(max = chipsMaxWidth),
+                        )
+                    }
                 }
             }
         }
@@ -542,6 +558,16 @@ private fun addStartSideComposable(
                 R.id.start_side_notif_and_chip_container
             )
         startSideNotifAndChipsView.addView(composeView, 0)
+    }
+
+    if (CapsuleStatusBarIntegration.isEnabled(statusBarViewModel)) {
+        addOngoingActivityCapsule(
+            phoneStatusBarView,
+            statusBarViewModel,
+            iconViewStore,
+            appHandlesViewModel,
+            composeView,
+        )
     }
 }
 

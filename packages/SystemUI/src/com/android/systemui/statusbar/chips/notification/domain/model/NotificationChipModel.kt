@@ -45,4 +45,6 @@ data class NotificationChipModel(
     val instanceId: InstanceId?,
     /** Notification claims to represent the app's active screenshare */
     val isScreenShareNotification: Boolean,
+    /** The source notification's category, used for activity-specific chip presentation. */
+    val category: String? = null,
 )

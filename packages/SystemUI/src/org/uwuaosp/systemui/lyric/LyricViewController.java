@@ -650,6 +650,7 @@ public abstract class LyricViewController implements DarkIconDispatcher.DarkRece
     public void startLyric() {
         if (!mStarted) {
             mStarted = true;
+            onLyricStartedChanged(true);
             showLyricView(true);
             postApplyTextTint();
         }
@@ -658,6 +659,7 @@ public abstract class LyricViewController implements DarkIconDispatcher.DarkRece
     public void stopLyric() {
         if (mStarted) {
             mStarted = false;
+            onLyricStartedChanged(false);
             mTemporarilyHidden = false;
             mOverlayLyricViewHolder.mLyricContainer.removeCallbacks(mRestoreLyricRunnable);
             hideLyricView(true);
@@ -674,6 +676,9 @@ public abstract class LyricViewController implements DarkIconDispatcher.DarkRece
     public abstract void showLyricView(boolean animate);
 
     public abstract void hideLyricView(boolean animate);
+
+    /** Called when a lyric track starts or stops rendering. */
+    protected void onLyricStartedChanged(boolean started) {}
 
     public boolean isLyricStarted() {
         return mStarted;

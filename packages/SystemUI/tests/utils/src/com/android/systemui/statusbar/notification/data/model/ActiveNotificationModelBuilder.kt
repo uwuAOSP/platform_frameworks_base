@@ -55,6 +55,7 @@ fun activeNotificationModel(
     promotedContent: PromotedNotificationContentModels? = null,
     notifStyle: NotifStyle? = null,
     isScreenShareNotification: Boolean = false,
+    category: String? = null,
 ) =
     ActiveNotificationModel(
         key = key,
@@ -84,4 +85,5 @@ fun activeNotificationModel(
         promotedContent = promotedContent,
         style = notifStyle,
         isScreenShareNotification = isScreenShareNotification,
+        category = category,
     )

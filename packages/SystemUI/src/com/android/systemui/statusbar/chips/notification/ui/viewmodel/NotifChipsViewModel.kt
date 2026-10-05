@@ -57,6 +57,7 @@ import com.android.systemui.statusbar.notification.shared.NotificationChipFromCo
 import com.android.systemui.util.kotlin.pairwise
 import com.android.systemui.util.time.SystemClock
 import javax.inject.Inject
+import org.uwuaosp.systemui.statusbar.NavigationNotificationPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -208,12 +209,17 @@ constructor(
             appName = appName,
             componentName = componentName,
             statusBarChipIconView = statusBarChipIconView,
-            textVariants = chipTextVariants,
+            textVariants = chipTextVariants?.takeIf { variants -> variants.any { it.isNotBlank() } }
+                ?: if (NavigationNotificationPolicy.isNavigationForwarder(packageName)) {
+                    listOfNotNull(content.shortCriticalText, content.text, content.title)
+                        .firstOrNull { it.isNotBlank() }?.let { listOf(it.toString()) }
+                } else chipTextVariants,
             time = chipTime,
             chronometer = chipChronometer,
             chronometerFormat =
                 chipChronometerFormat ?: OngoingActivityChipModel.Content.Timer.Format.CHRONOMETER,
             semanticStyle = chipSemanticStyle,
+            category = category,
             isAppVisible = isAppVisible,
             instanceId = instanceId,
             isScreenShareNotification = isScreenShareNotification,
@@ -362,8 +368,12 @@ constructor(
                 contentDescription,
             )
 
+        val isNavigationActivity = category == Notification.CATEGORY_NAVIGATION ||
+            NavigationNotificationPolicy.isNavigationForwarder(packageName)
         val colors =
-            if (NotificationChipFromCompactContent.isEnabled && this.semanticStyle != null) {
+            if (isNavigationActivity) {
+                NAVIGATION_COLORS
+            } else if (NotificationChipFromCompactContent.isEnabled && this.semanticStyle != null) {
                 ColorsModel.SystemThemedWithOverride(textRes = this.semanticStyle.toColorResource())
             } else {
                 ColorsModel.SystemThemed
@@ -458,6 +468,7 @@ constructor(
             icon = icon,
             content = content,
             colors = colors,
+            isNavigationActivity = isNavigationActivity,
             clickBehavior = clickBehavior,
             isHidden = isHidden,
             transitionManager = transitionManager,
@@ -512,9 +523,16 @@ constructor(
         val isAppVisible: Boolean,
         val instanceId: InstanceId?,
         val isScreenShareNotification: Boolean,
+        val category: String?,
     )
 
     companion object {
+        // Fixed navigation blue with white text/icons, independent of wallpaper and app colors.
+        private val NAVIGATION_COLORS = ColorsModel.Custom(
+            backgroundColorInt = 0xFF1565C0.toInt(),
+            primaryTextColorInt = 0xFFFFFFFF.toInt(),
+        )
+
         /**
          * Notifications must have a `when` time of at least 1 minute in the future in order for the
          * status bar chip to show the time.

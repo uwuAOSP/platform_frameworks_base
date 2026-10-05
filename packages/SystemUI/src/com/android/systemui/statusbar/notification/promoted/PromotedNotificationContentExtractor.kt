@@ -59,6 +59,7 @@ import com.android.systemui.statusbar.notification.shared.NotificationChipFromCo
 import com.android.systemui.statusbar.notification.shared.extractMetrics
 import com.android.systemui.util.time.SystemClock
 import javax.inject.Inject
+import org.uwuaosp.systemui.statusbar.NavigationNotificationPolicy
 
 interface PromotedNotificationContentExtractor {
     @WorkerThread
@@ -98,7 +99,8 @@ constructor(
             }
             return null
         }
-        if (!notification.isPromotedOngoing()) {
+        if (!notification.isPromotedOngoing() &&
+            !NavigationNotificationPolicy.isNavigationForwarder(entry.sbn.packageName)) {
             if (LOG_NOT_EXTRACTED) {
                 logger.logExtractionSkipped(entry, "isPromotedOngoing returned false")
             }

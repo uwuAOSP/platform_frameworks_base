@@ -224,6 +224,7 @@ private class ActiveNotificationsStoreBuilder(
             requestedPromotion = sbn.notification.isRequestPromotedOngoing,
             isScreenShareNotification = sbn.notification.isScreenShareNotification(),
             notifStyle = notifStyle(sbn.notification),
+            category = sbn.notification.category,
         )
     }
 }
@@ -260,6 +261,7 @@ private fun ActiveNotificationsStore.createOrReuseNotif(
     requestedPromotion: Boolean,
     isScreenShareNotification: Boolean,
     notifStyle: NotifStyle?,
+    category: String?,
 ): ActiveNotificationModel {
     return individuals[key]?.takeIf {
         it.isCurrent(
@@ -290,6 +292,7 @@ private fun ActiveNotificationsStore.createOrReuseNotif(
             requestedPromotion = requestedPromotion,
             isScreenShareNotification = isScreenShareNotification,
             style = notifStyle,
+            category = category,
         )
     }
         ?: ActiveNotificationModel(
@@ -320,6 +323,7 @@ private fun ActiveNotificationsStore.createOrReuseNotif(
             requestedPromotion = requestedPromotion,
             isScreenShareNotification = isScreenShareNotification,
             style = notifStyle,
+            category = category,
         )
 }
 
@@ -351,6 +355,7 @@ private fun ActiveNotificationModel.isCurrent(
     requestedPromotion: Boolean,
     isScreenShareNotification: Boolean,
     style: NotifStyle?,
+    category: String?,
 ): Boolean {
     return when {
         key != this.key -> false
@@ -382,6 +387,7 @@ private fun ActiveNotificationModel.isCurrent(
         requestedPromotion != this.requestedPromotion -> false
         isScreenShareNotification != this.isScreenShareNotification -> false
         style != this.style -> false
+        category != this.category -> false
         else -> true
     }
 }

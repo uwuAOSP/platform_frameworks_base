@@ -318,7 +318,23 @@ constructor(
     private val userLogoutInteractor: UserLogoutInteractor,
     private val scrollToTopInteractor: ScrollToTopInteractor,
     private val secureSettingsRepository: SecureSettingsRepository,
-) : HomeStatusBarViewModel, HydratedActivatable(enableEnqueuedActivations = true) {
+) : HomeStatusBarViewModel, org.uwuaosp.systemui.capsule.CapsuleStatusBarHost,
+    HydratedActivatable(enableEnqueuedActivations = true) {
+
+    // Optional presentation bridge; native flows below remain independent of the capsule.
+    override val capsuleState by lazy {
+        org.uwuaosp.systemui.capsule.CapsuleStatusBarState(
+            activities = ongoingActivityChipsViewModel.presentationChips,
+            canShow = statusBarVisibilityInteractor.canShowOngoingActivityChips,
+            shouldShowStatusBar = statusBarVisibilityInteractor.shouldHomeStatusBarBeVisible,
+            clockAllowed = homeStatusBarInteractor.visibilityViaDisableFlags.map {
+                VisibilityModel(it.isClockAllowed.toVisibleOrInvisible(), it.animate)
+            },
+            notificationIconsAllowed = homeStatusBarInteractor.visibilityViaDisableFlags.map {
+                VisibilityModel(it.areNotificationIconsAllowed.toVisibleOrGone(), it.animate)
+            },
+        )
+    }
 
     val logger = loggerFactory.getOrCreate(logBufferName(thisDisplayId), 60)
     val tableLogger = tableLoggerFactory.getOrCreate(tableLogBufferName(thisDisplayId), 200)

@@ -28,6 +28,7 @@ import android.graphics.Rect
 import android.platform.test.annotations.DisableFlags
 import android.platform.test.annotations.EnableFlags
 import android.platform.test.flag.junit.FlagsParameterization
+import android.provider.Settings
 import android.view.Display.DEFAULT_DISPLAY
 import android.view.Display.TYPE_EXTERNAL
 import android.view.View
@@ -71,7 +72,11 @@ import com.android.systemui.scene.domain.interactor.sceneInteractor
 import com.android.systemui.scene.shared.flag.SceneContainerFlag
 import com.android.systemui.scene.shared.model.Overlays
 import com.android.systemui.scene.shared.model.Scenes
+import com.android.systemui.shared.settings.data.repository.secureSettingsRepository
 import com.android.systemui.screenrecord.data.model.ScreenRecordModel
+import com.android.systemui.statusbar.chips.ui.model.OngoingActivityChipModel
+import org.uwuaosp.systemui.capsule.CapsuleStatusBarHost
+import org.uwuaosp.systemui.capsule.CapsuleStatusBarState
 import com.android.systemui.screenrecord.data.repository.screenRecordRepository
 import com.android.systemui.shade.data.repository.fakeShadeDisplaysRepository
 import com.android.systemui.shade.data.repository.statusBarTouchShadeDisplayPolicy
@@ -130,6 +135,8 @@ import platform.test.runner.parameterized.Parameters
 @RunWith(ParameterizedAndroidJunit4::class)
 @SmallTest
 class HomeStatusBarViewModelImplTest(flags: FlagsParameterization) : SysuiTestCase() {
+    private val HomeStatusBarViewModel.capsuleState: CapsuleStatusBarState
+        get() = (this as CapsuleStatusBarHost).capsuleState
     init {
         mSetFlagsRule.setFlagsParameterization(flags)
     }
@@ -698,6 +705,29 @@ class HomeStatusBarViewModelImplTest(flags: FlagsParameterization) : SysuiTestCa
         }
 
     @Test
+    fun isClockVisible_liveChipWithLyricsEnabled_invisible() =
+        kosmos.runTest {
+            val latest by collectLastValue(underTest.capsuleState.isClockVisible)
+            transitionKeyguardToGone()
+            kosmos.secureSettingsRepository.setBoolean(Settings.Secure.STATUS_BAR_SHOW_LYRIC, true)
+            kosmos.screenRecordRepository.screenRecordState.value = ScreenRecordModel.Recording
+            underTest.capsuleState.onLyricStartedChanged(true)
+
+            assertThat(latest!!.visibility).isEqualTo(View.INVISIBLE)
+        }
+
+    @Test
+    fun isClockVisible_chipWithLyricsEnabledButNoTrack_remainsVisible() =
+        kosmos.runTest {
+            val latest by collectLastValue(underTest.capsuleState.isClockVisible)
+            transitionKeyguardToGone()
+            kosmos.secureSettingsRepository.setBoolean(Settings.Secure.STATUS_BAR_SHOW_LYRIC, true)
+            kosmos.screenRecordRepository.screenRecordState.value = ScreenRecordModel.Recording
+
+            assertThat(latest!!.visibility).isEqualTo(View.VISIBLE)
+        }
+
+    @Test
     fun isClockVisible_allowedByDisableFlags_hunPinnedByUser_visible() =
         kosmos.runTest {
             val latest by collectLastValue(underTest.isClockVisible)
@@ -773,6 +803,45 @@ class HomeStatusBarViewModelImplTest(flags: FlagsParameterization) : SysuiTestCa
             kosmos.screenRecordRepository.screenRecordState.value = ScreenRecordModel.DoingNothing
 
             assertThat(latest!!.visibility).isEqualTo(View.VISIBLE)
+        }
+
+    @Test
+    fun isLyricVisible_liveChip_waitsForMeasuredChipBounds() =
+        kosmos.runTest {
+            val latest by collectLastValue(underTest.capsuleState.isLyricVisible)
+            transitionKeyguardToGone()
+            kosmos.screenRecordRepository.screenRecordState.value = ScreenRecordModel.Recording
+
+            assertThat(latest!!.visibility).isEqualTo(View.GONE)
+
+            underTest.capsuleState.onOngoingActivityChipBoundsChanged(Rect(420, 0, 610, 48))
+
+            assertThat(latest!!.visibility).isEqualTo(View.VISIBLE)
+        }
+
+    @Test
+    @EnableFlags(com.android.systemui.statusbar.notification.shared.StatusBarHeadline.FLAG_NAME)
+    fun isNotificationIconContainerVisible_anyChipShowing_headlineEnabled() =
+        kosmos.runTest {
+            val latest by collectLastValue(underTest.capsuleState.isNotificationIconContainerVisible)
+            transitionKeyguardToGone()
+
+            kosmos.screenRecordRepository.screenRecordState.value = ScreenRecordModel.Recording
+
+            assertThat(latest!!.visibility).isEqualTo(View.GONE)
+        }
+
+    @Test
+    @EnableFlags(com.android.systemui.statusbar.notification.shared.StatusBarHeadline.FLAG_NAME)
+    fun ongoingActivityChips_phoneStillRendersWhenHeadlineEnabled() =
+        kosmos.runTest {
+            val viewModel = underTest
+            val latest by collectLastValue(viewModel.capsuleState.chips)
+            transitionKeyguardToGone()
+            kosmos.screenRecordRepository.screenRecordState.value = ScreenRecordModel.Recording
+
+            assertThat(latest!!.areChipsAllowed).isTrue()
+            assertThat(latest!!.chips.active).isNotEmpty()
         }
 
     @Test

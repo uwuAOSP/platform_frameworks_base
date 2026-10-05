@@ -257,6 +257,108 @@ class NotifChipsViewModelTest(flags: FlagsParameterization) : SysuiTestCase() {
         }
 
     @Test
+    fun chips_navigationForwarder_withoutNavigationCategory_usesBlueAndBodyText() =
+        kosmos.runTest {
+            val latest by collectLastValue(underTest.chips)
+            val content = newPromotedNotificationContentBuilder("forwarded").applyToShared {
+                text = "Turn left in 100 m"
+                title = "Navigation"
+            }.build()
+            setNotifs(listOf(activeNotificationModel(
+                key = "forwarded",
+                packageName = "com.oplus.pantanal.ums",
+                category = null,
+                requestedPromotion = false,
+                isOngoingEvent = false,
+                promotedContent = content,
+            )))
+
+            val chip = latest!!.single()
+            assertThat(chip.colors.background(context).defaultColor).isEqualTo(0xFF1565C0.toInt())
+            assertThat(chip.colors.text(context)).isEqualTo(0xFFFFFFFF.toInt())
+            assertThat(chip.isNavigationActivity).isTrue()
+            assertThat(chip.content).isEqualTo(OngoingActivityChipModel.Content.Text("Turn left in 100 m"))
+        }
+
+    @Test
+    @EnableFlags(FLAG_NOTIFICATION_CHIP_FROM_COMPACT_CONTENT)
+    fun chips_navigationForwarder_withoutCompactText_fallsBackToTitle() =
+        kosmos.runTest {
+            val latest by collectLastValue(underTest.chips)
+            val content = newPromotedNotificationContentBuilder("forwarded").applyToShared {
+                title = "Turn left"
+                text = " "
+                compactContent = Notification.ResolvedBasicCompactContent(
+                    COMPACT_ICON, null, Notification.SEMANTIC_STYLE_UNSPECIFIED,
+                )
+            }.build()
+            setNotifs(listOf(activeNotificationModel(
+                key = "forwarded",
+                packageName = "com.oplus.pantanal.ums",
+                promotedContent = content,
+            )))
+
+            assertThat(latest!!.single().content)
+                .isEqualTo(OngoingActivityChipModel.Content.Text("Turn left"))
+        }
+
+    @Test
+    fun chips_navigationNotification_usesFixedBlueWithWhiteForeground() =
+        kosmos.runTest {
+            val latest by collectLastValue(underTest.chips)
+            setNotifs(listOf(activeNotificationModel(
+                key = "navigation",
+                category = Notification.CATEGORY_NAVIGATION,
+                promotedContent = newPromotedNotificationContentBuilder("navigation").build(),
+            )))
+
+            val colors = latest!!.single().colors
+            assertThat(colors.background(context).defaultColor).isEqualTo(0xFF1565C0.toInt())
+            assertThat(colors.text(context)).isEqualTo(0xFFFFFFFF.toInt())
+            assertThat(colors.outline(context)).isNull()
+        }
+
+    @Test
+    @EnableFlags(FLAG_NOTIFICATION_CHIP_FROM_COMPACT_CONTENT)
+    fun chips_navigationNotification_overridesAppSemanticColor() =
+        kosmos.runTest {
+            val latest by collectLastValue(underTest.chips)
+            val content = newPromotedNotificationContentBuilder("navigation").applyToShared {
+                compactContent = Notification.ResolvedBasicCompactContent(
+                    COMPACT_ICON,
+                    Notification.Metric.FixedText("Turn left"),
+                    Notification.SEMANTIC_STYLE_SAFE,
+                )
+            }.build()
+            setNotifs(listOf(activeNotificationModel(
+                key = "navigation",
+                category = Notification.CATEGORY_NAVIGATION,
+                promotedContent = content,
+            )))
+
+            val colors = latest!!.single().colors
+            assertThat(colors.background(context).defaultColor).isEqualTo(0xFF1565C0.toInt())
+            assertThat(colors.text(context)).isEqualTo(0xFFFFFFFF.toInt())
+        }
+
+    @Test
+    fun chips_notificationCategoryChanges_restoresDefaultColor() =
+        kosmos.runTest {
+            val latest by collectLastValue(underTest.chips)
+            val navigation = activeNotificationModel(
+                key = "navigation",
+                category = Notification.CATEGORY_NAVIGATION,
+                promotedContent = newPromotedNotificationContentBuilder("navigation").build(),
+            )
+            setNotifs(listOf(navigation))
+            assertThat(latest!!.single().colors).isInstanceOf(ColorsModel.Custom::class.java)
+
+            setNotifs(listOf(navigation.copy(category = Notification.CATEGORY_STATUS)))
+            assertThat(latest!!.single().colors).isEqualTo(ColorsModel.SystemThemed)
+            assertThat(latest!!.single().isNavigationActivity).isFalse()
+        }
+
+    @Test
     fun chips_onePromotedNotif_colorIsSystemThemed() =
         kosmos.runTest {
             val latest by collectLastValue(underTest.chips)

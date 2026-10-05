@@ -109,6 +109,8 @@ data class ActiveNotificationModel(
     val isScreenShareNotification: Boolean,
     /** The visual style of the notification, containing additional data relevant to that style. */
     val style: NotifStyle?,
+    /** The category declared by the notification, such as navigation. */
+    val category: String? = null,
 ) : ActiveNotificationEntryModel() {
     companion object {
         private const val TAG = "ActiveNotificationEntryModel"
