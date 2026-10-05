@@ -54,8 +54,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.booleanResource
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
@@ -524,6 +526,15 @@ private fun ContentScope.SplitShade(
         }
 
     val notificationStackPadding = dimensionResource(id = R.dimen.notification_side_paddings_split)
+    val qsTopPadding =
+        if (
+            LocalConfiguration.current.smallestScreenWidthDp >= 600 &&
+                booleanResource(R.bool.config_use_large_screen_shade_header)
+        ) {
+            dimensionResource(R.dimen.qs_panel_padding_top)
+        } else {
+            0.dp
+        }
     val navBarBottomHeight = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     val brightnessMirrorShowing = qsContainerViewModel.brightnessSliderViewModel.showMirror
@@ -646,6 +657,7 @@ private fun ContentScope.SplitShade(
                                             QuickSettingsContent(
                                                 qsContainerViewModel,
                                                 mediaInRow = false,
+                                                modifier = Modifier.padding(top = qsTopPadding),
                                                 mediaSquishiness = { tileSquishiness },
                                             )
                                         }
