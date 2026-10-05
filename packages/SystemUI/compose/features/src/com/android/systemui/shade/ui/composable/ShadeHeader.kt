@@ -72,6 +72,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.booleanResource
+import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.DeviceFontFamilyName
 import androidx.compose.ui.text.font.Font
@@ -191,6 +193,22 @@ fun ContentScope.CollapsedShadeHeader(
     val cutoutLocation = LocalDisplayCutout.current().location
     val horizontalPadding =
         max(LocalScreenCornerRadius.current / 2f, Shade.Dimensions.HorizontalPadding)
+    val headerHeightPx =
+        if (
+            isSplitShade &&
+                LocalConfiguration.current.smallestScreenWidthDp >= 600 &&
+                booleanResource(R.bool.config_use_large_screen_shade_header)
+        ) {
+            // 合并面板保留大屏头部高度，不能只占状态栏的高度
+            max(
+                viewModel.statusBarHeightPx,
+                with(LocalDensity.current) {
+                    dimensionResource(R.dimen.large_screen_shade_header_height).roundToPx()
+                },
+            )
+        } else {
+            viewModel.statusBarHeightPx
+        }
 
     val useExpandedTextFormat by
         remember(cutoutLocation) {
@@ -203,7 +221,7 @@ fun ContentScope.CollapsedShadeHeader(
 
     // This layout assumes it is globally positioned at (0, 0) and is the same size as the screen.
     CutoutAwareShadeHeader(
-        statusBarHeightPx = viewModel.statusBarHeightPx,
+        statusBarHeightPx = headerHeightPx,
         modifier = modifier.sysuiResTag(ShadeHeader.TestTags.Root),
         startContent = {
             Row(
