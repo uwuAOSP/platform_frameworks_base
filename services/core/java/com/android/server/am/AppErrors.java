@@ -42,6 +42,9 @@ import android.app.usage.UsageStatsManager;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.IPackageDeleteObserver;
+import android.content.pm.PackageManager;
 import android.content.pm.VersionedPackage;
 import android.net.Uri;
 import android.os.Binder;
@@ -83,6 +86,8 @@ import java.util.List;
 class AppErrors {
 
     private static final String TAG = TAG_WITH_CLASS_NAME ? "AppErrors" : TAG_AM;
+    private static final String SYSTEM_UI_PACKAGE_NAME = "com.android.systemui";
+    private static final int SYSTEM_UI_CRASH_ROLLBACK_THRESHOLD = 8;
 
     private final ActivityManagerService mService;
     private final ActivityManagerGlobalLock mProcLock;
@@ -1028,7 +1033,13 @@ class AppErrors {
             // because they don't have a persistent identity.
             mProcessCrashTimes.put(processName, uid, now);
             mProcessCrashTimesPersistent.put(processName, uid, now);
-            updateProcessCrashCountLBp(processName, uid, now);
+            final int crashCount = updateProcessCrashCountLBp(processName, uid, now);
+            if (crashCount == SYSTEM_UI_CRASH_ROLLBACK_THRESHOLD
+                    && app.info != null
+                    && SYSTEM_UI_PACKAGE_NAME.equals(app.info.packageName)
+                    && (app.info.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0) {
+                mService.mHandler.post(this::rollbackSystemUiUpdate);
+            }
         }
 
         if (errState.getCrashHandler() != null) {
@@ -1038,7 +1049,7 @@ class AppErrors {
     }
 
     @GuardedBy("mBadProcessLock")
-    private void updateProcessCrashCountLBp(String processName, int uid, long now) {
+    private int updateProcessCrashCountLBp(String processName, int uid, long now) {
         Pair<Long, Integer> count = mProcessCrashCounts.get(processName, uid);
         if (count == null || (count.first + PROCESS_CRASH_COUNT_RESET_INTERVAL) < now) {
             count = new Pair<>(now, 1);
@@ -1046,6 +1057,24 @@ class AppErrors {
             count = new Pair<>(count.first, count.second + 1);
         }
         mProcessCrashCounts.put(processName, uid, count);
+        return count.second;
+    }
+
+    private void rollbackSystemUiUpdate() {
+        Slog.w(TAG, "SystemUI crashed " + SYSTEM_UI_CRASH_ROLLBACK_THRESHOLD
+                + " times; reverting its system app update");
+        mContext.getPackageManager().deletePackageAsUser(SYSTEM_UI_PACKAGE_NAME,
+                new IPackageDeleteObserver.Stub() {
+                    @Override
+                    public void packageDeleted(String packageName, int returnCode) {
+                        if (returnCode == PackageManager.DELETE_SUCCEEDED) {
+                            Slog.i(TAG, "Reverted SystemUI to the system image version");
+                        } else {
+                            Slog.e(TAG, "Failed to revert SystemUI system app update: "
+                                    + returnCode);
+                        }
+                    }
+                }, 0, UserHandle.USER_SYSTEM);
     }
 
     @GuardedBy("mBadProcessLock")
