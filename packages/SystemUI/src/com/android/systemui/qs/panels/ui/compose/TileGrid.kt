@@ -25,6 +25,8 @@ import com.android.systemui.qs.panels.ui.viewmodel.TileGridViewModel
  * Displays a grid of tiles with an optional reveal animation.
  *
  * @param enableRevealEffect If `true`, the tiles will animate using the reveal animation.
+ * @param showEditButton Whether the layout should render its own edit (pencil) button. The circular
+ *   style hosts that button in the QS header row instead.
  */
 @Composable
 fun ContentScope.TileGrid(
@@ -32,6 +34,7 @@ fun ContentScope.TileGrid(
     modifier: Modifier = Modifier,
     listening: () -> Boolean = { true },
     enableRevealEffect: Boolean = false,
+    showEditButton: Boolean = true,
 ) {
     val gridLayout = viewModel.gridLayout
     val tiles = viewModel.tileViewModels
@@ -41,6 +44,7 @@ fun ContentScope.TileGrid(
             modifier = modifier,
             listening = listening,
             enableRevealEffect = enableRevealEffect,
+            showEditButton = showEditButton,
         )
     }
 }

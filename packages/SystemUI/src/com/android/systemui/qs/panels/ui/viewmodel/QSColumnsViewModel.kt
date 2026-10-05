@@ -28,6 +28,7 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import org.uwuaosp.systemui.qsstyle.QSStyleRepository
 
 /**
  * View model for the number of columns that should be shown in a QS grid.
@@ -41,6 +42,7 @@ constructor(
     interactor: QSColumnsInteractor,
     mediaInRowInLandscapeViewModelFactory: MediaInRowInLandscapeViewModel.Factory,
     private val largeTileSpanInteractor: LargeTileSpanInteractor,
+    private val qsStyleRepository: QSStyleRepository,
     @Assisted @MediaLocation mediaLocation: Int?,
     @Assisted mediaUiBehavior: MediaUiBehavior?,
 ) : HydratedActivatable() {
@@ -62,12 +64,15 @@ constructor(
         largeTileSpanInteractor.useExtraLargeTiles.hydratedStateOf(initialValue = false)
 
     val largeSpan: Int
-        get() =
-            if (useExtraLargeTiles) {
+        get() {
+            // The circular style renders every tile as a single cell.
+            if (qsStyleRepository.style.value.isCircular) return 1
+            return if (useExtraLargeTiles) {
                 if (columns > maxSpan) columns / 2 else columns
             } else {
                 largeTileSpanInteractor.defaultTileMaxWidth
             }
+        }
 
     private val mediaInRowInLandscapeViewModel =
         if (mediaLocation != null && mediaUiBehavior != null) {

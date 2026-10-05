@@ -32,7 +32,10 @@ import com.android.systemui.qs.pipeline.shared.TileSpec
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import org.uwuaosp.systemui.qsstyle.QSStyleRepository
+import org.uwuaosp.systemui.qsstyle.QSTileStyle
 
 class QuickQuickSettingsViewModel
 @AssistedInject
@@ -43,6 +46,7 @@ constructor(
     mediaInRowInLandscapeViewModelFactory: MediaInRowInLandscapeViewModel.Factory,
     val squishinessViewModel: TileSquishinessViewModel,
     iconTilesViewModel: IconTilesViewModel,
+    private val qsStyleRepository: QSStyleRepository,
     val tileHapticsViewModelFactory: TileHapticsViewModel.Factory,
 ) : HydratedActivatable() {
 
@@ -50,14 +54,45 @@ constructor(
     private val mediaInRowViewModel =
         mediaInRowInLandscapeViewModelFactory.create(LOCATION_QQS, mediaUiBehavior)
 
+    /** Active tile style. Observed as snapshot state so style changes recompose immediately. */
+    private val qsStyle by qsStyleRepository.style.hydratedStateOf()
+
+    /**
+     * Raw style flow, observed directly by the tile composables. Unlike the hydrated state above it
+     * is always in sync with the setting, so the panel never lays out tiles with a stale style.
+     */
+    val tileStyleFlow: StateFlow<QSTileStyle> = qsStyleRepository.style
+
+    /**
+     * Whether the circular style is active, taking the raw setting into account so the panel does
+     * not depend on the hydrator having finished.
+     */
+    private val isCircular: Boolean
+        get() = qsStyle.isCircular || qsStyleRepository.style.value.isCircular
+
+    /** Whether the circular tile style is active. Read during composition to stay reactive. */
+    val isCircularStyle: Boolean
+        get() = isCircular
+
+    /** Active tile style, provided to the tile composables through `LocalQSTileStyle`. */
+    val tileStyle: QSTileStyle
+        get() = if (isCircular) QSTileStyle.CIRCULAR else qsStyle
+
     val columns: Int
-        get() = qsColumnsViewModel.columns
+        get() =
+            if (isCircular) {
+                QSTileStyle.CIRCULAR_QQS_COLUMNS
+            } else {
+                qsColumnsViewModel.columns
+            }
 
     private val largeTiles by iconTilesViewModel.largeTiles.hydratedStateOf()
 
     private val rows: Int
         get() =
-            if (mediaInRowViewModel.shouldMediaShowInRow) {
+            if (isCircular) {
+                QSTileStyle.CIRCULAR_QQS_ROWS
+            } else if (mediaInRowViewModel.shouldMediaShowInRow) {
                 rowsWithoutMedia * 2
             } else {
                 rowsWithoutMedia
@@ -69,13 +104,17 @@ constructor(
         )
 
     private val largeTilesSpan: Int
-        get() = qsColumnsViewModel.largeSpan
+        get() = if (isCircular) 1 else qsColumnsViewModel.largeSpan
 
     private val currentTiles by tilesInteractor.currentTiles.hydratedStateOf()
 
     val tileViewModels by derivedStateOf {
         currentTiles
-            .map { SizedTileImpl(TileViewModel(it.tile, it.spec, it.expandable), it.spec.width()) }
+            .map {
+                // The circular style forces every tile to a single cell.
+                val span = if (isCircular) 1 else it.spec.width()
+                SizedTileImpl(TileViewModel(it.tile, it.spec, it.expandable), span)
+            }
             .let { splitInRowsSequence(it, columns).take(rows).toList().flatten() }
     }
 

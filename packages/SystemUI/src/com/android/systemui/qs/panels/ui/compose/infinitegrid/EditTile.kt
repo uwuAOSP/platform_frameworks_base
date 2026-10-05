@@ -18,6 +18,7 @@
 
 package com.android.systemui.qs.panels.ui.compose.infinitegrid
 
+import android.content.Context
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColor
@@ -65,6 +66,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeightIn
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.systemBars
@@ -147,6 +149,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.Hyphens
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -220,6 +223,8 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import org.uwuaosp.systemui.qsstyle.CircularCornerRadius
+import org.uwuaosp.systemui.qsstyle.LocalQSTileStyle
 
 object TileType
 
@@ -247,6 +252,15 @@ fun DefaultEditTileGrid(
     modifier: Modifier = Modifier,
     scrollState: ScrollState = rememberScrollState(),
     onStopEditing: () -> Unit = {},
+    /**
+     * Whether the uwuAOSP circular tile style is active.
+     *
+     * The value is threaded explicitly down to every tile composable. It defaults to the style
+     * provided by the edit mode scene, which is what
+     * [org.uwuaosp.systemui.qsstyle.QSStyleRepository] observes, so the style is correct even
+     * before the view model hydrates.
+     */
+    circular: Boolean = LocalQSTileStyle.current.isCircular,
     onEditAction: (EditAction) -> Unit = {},
 ) {
     val selectionState = rememberSelectionState()
@@ -354,6 +368,7 @@ fun DefaultEditTileGrid(
                         listState = listState,
                         selectionState = selectionState,
                         onEditAction = onEditAction,
+                        circular = circular,
                     )
 
                     // Only show available tiles when a drag or placement isn't in progress, OR the
@@ -364,6 +379,7 @@ fun DefaultEditTileGrid(
                         selectionState = selectionState,
                         onEditAction = onEditAction,
                         canLayoutTile = true,
+                        circular = circular,
                         showAvailableTiles =
                             !(listState.dragInProgress || selectionState.placementEnabled) ||
                                 listState.dragType == DragType.Move,
@@ -602,6 +618,7 @@ private fun CurrentTilesGrid(
     listState: EditTileListState,
     selectionState: MutableSelectionState,
     onEditAction: (EditAction) -> Unit,
+    circular: Boolean = false,
 ) {
     val currentListState by rememberUpdatedState(listState)
     val totalRows = listState.tiles.lastOrNull()?.row ?: 0
@@ -649,6 +666,7 @@ private fun CurrentTilesGrid(
             gridState = gridState,
             coroutineScope = coroutineScope,
             onRemoveTile = { onEditAction(EditAction.RemoveTile(it)) },
+            circular = circular,
         ) { resizingOperation ->
             when (resizingOperation) {
                 is TemporaryResizeOperation -> {
@@ -697,6 +715,7 @@ private fun AnimatedAvailableTilesGrid(
     showAvailableTiles: Boolean,
     canLayoutTile: Boolean,
     onEditAction: (EditAction) -> Unit,
+    circular: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     // Sets a minimum height to be used when available tiles are hidden
@@ -719,12 +738,13 @@ private fun AnimatedAvailableTilesGrid(
                 modifier = modifier.fillMaxSize(),
             ) {
                 AvailableTileGrid(
-                    allTiles,
-                    selectionState,
-                    listState.columns,
+                    tiles = allTiles,
+                    selectionState = selectionState,
+                    columns = listState.columns,
                     canLayoutTile = canLayoutTile,
-                    { onEditAction(EditAction.AddTile(it)) }, // Add to the end
-                    listState,
+                    onAddTile = { onEditAction(EditAction.AddTile(it)) }, // Add to the end
+                    dragAndDropState = listState,
+                    circular = circular,
                 )
 
                 TextButton(
@@ -754,6 +774,7 @@ private fun AvailableTileGrid(
     canLayoutTile: Boolean,
     onAddTile: (TileSpec) -> Unit,
     dragAndDropState: DragAndDropState,
+    circular: Boolean = false,
 ) {
     // Group and sort to get the proper order tiles should be displayed in
     val groupedTileSpecs =
@@ -814,6 +835,7 @@ private fun AvailableTileGrid(
                                         selectionState = selectionState,
                                         canLayoutTile = canLayoutTile,
                                         onAddTile = onAddTile,
+                                        circular = circular,
                                         modifier = Modifier.weight(1f).fillMaxHeight(),
                                     )
                                 }
@@ -845,6 +867,7 @@ private fun GridCell.key(index: Int): Any {
  * @param gridState the [LazyGridState] for this grid
  * @param coroutineScope the [CoroutineScope] to be used for the tiles
  * @param onRemoveTile the callback when a tile is removed from this grid
+ * @param circular whether the uwuAOSP circular tile style is active
  * @param onResize the callback when a tile has a new [ResizeOperation]
  */
 fun LazyGridScope.EditTiles(
@@ -853,6 +876,7 @@ fun LazyGridScope.EditTiles(
     gridState: LazyGridState,
     coroutineScope: CoroutineScope,
     onRemoveTile: (TileSpec) -> Unit,
+    circular: Boolean = false,
     onResize: (operation: ResizeOperation) -> Unit,
 ) {
     itemsIndexed(
@@ -865,14 +889,30 @@ fun LazyGridScope.EditTiles(
             is TileGridCell ->
                 if (listState.isMoving(cell.tile.tileSpec)) {
                     // If the tile is being moved, replace it with a visible spacer
-                    SpacerGridCell(
-                        Modifier.background(
-                            color =
-                                MaterialTheme.colorScheme.secondary.copy(
-                                    alpha = EditModeTileDefaults.PLACEHOLDER_ALPHA
-                                ),
-                            shape = RoundedCornerShape(InactiveTileCornerRadius),
+                    val placeholderColor =
+                        MaterialTheme.colorScheme.secondary.copy(
+                            alpha = EditModeTileDefaults.PLACEHOLDER_ALPHA
                         )
+                    SpacerGridCell(
+                        if (circular) {
+                            // The circular style has no pill, so the slot left behind by the moving
+                            // tile is marked with a circle, like the icon it replaces.
+                            val toggleTargetSize = ToggleTargetSize
+                            val toggleTargetSizePx =
+                                with(LocalDensity.current) { toggleTargetSize.toPx() }
+                            Modifier.drawBehind {
+                                drawCircle(
+                                    color = placeholderColor,
+                                    radius = toggleTargetSizePx / 2f,
+                                    center = Offset(size.width / 2f, toggleTargetSizePx / 2f),
+                                )
+                            }
+                        } else {
+                            Modifier.background(
+                                color = placeholderColor,
+                                shape = RoundedCornerShape(InactiveTileCornerRadius),
+                            )
+                        }
                     )
                 } else {
                     TileGridCell(
@@ -885,6 +925,7 @@ fun LazyGridScope.EditTiles(
                         onRemoveTile = onRemoveTile,
                         coroutineScope = coroutineScope,
                         largeTilesSpan = listState.largeTilesSpan,
+                        circular = circular,
                     )
                 }
             is SpacerGridCell ->
@@ -923,6 +964,7 @@ private fun LazyGridItemScope.TileGridCell(
     onRemoveTile: (TileSpec) -> Unit,
     coroutineScope: CoroutineScope,
     largeTilesSpan: Int,
+    circular: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val stateDescription = stringResource(id = R.string.accessibility_qs_edit_position, index + 1)
@@ -1013,6 +1055,7 @@ private fun LazyGridItemScope.TileGridCell(
             }
         },
         contentDescription = decorationClickLabel,
+        circular = circular,
     ) {
         // Rapidly composing elements with the draggable modifier can cause visual jank. This
         // usually happens when resizing a tile multiple times. We can fix this by applying the
@@ -1034,6 +1077,10 @@ private fun LazyGridItemScope.TileGridCell(
         val toggleSelectionLabel = stringResource(R.string.accessibility_qs_edit_toggle_selection)
         val placeTileLabel = stringResource(R.string.accessibility_qs_edit_place_tile_action)
         val containerAlpha by animateFloatAsState(if (tileState == TileState.GreyedOut) .4f else 1f)
+        // The circular style has no pill: only the circular icon background carries the color, so
+        // the greyed out state is applied to the icon and label instead of the container.
+        val tileColors =
+            if (circular) EditModeTileDefaults.circularEditTileColors(containerAlpha) else colors
         Box(
             Modifier.fillMaxSize()
                 .clearAndSetSemantics {
@@ -1077,20 +1124,28 @@ private fun LazyGridItemScope.TileGridCell(
                 }
                 .borderOnFocus(
                     MaterialTheme.colorScheme.secondary,
-                    CornerSize(InactiveTileCornerRadius),
+                    // The circular style has no pill, so the focus ring follows the circle.
+                    CornerSize(if (circular) CircularCornerRadius else InactiveTileCornerRadius),
                 )
                 .thenIf(isSelectable) { draggableModifier }
                 .tileBackground(
                     cornerRadius = InactiveTileCornerRadius,
                     alpha = { containerAlpha },
-                    color = { colors.background },
+                    color = { tileColors.background },
+                    circular = circular,
                 )
                 .keyboardShortcuts(cell.tile.tileSpec, selectionState) {
                     onResize(FinalResizeOperation(cell.tile.tileSpec, !cell.isIcon))
                 }
                 .thenIf(isSelectable) { selectableModifier }
         ) {
-            EditTile(tile = cell.tile, state = resizingState, progress = resizingState::progress)
+            EditTile(
+                tile = cell.tile,
+                state = resizingState,
+                progress = resizingState::progress,
+                colors = tileColors,
+                circular = circular,
+            )
         }
     }
 }
@@ -1123,6 +1178,7 @@ private fun AvailableTileGridCell(
     selectionState: MutableSelectionState,
     canLayoutTile: Boolean,
     onAddTile: (TileSpec) -> Unit,
+    circular: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val stateDescription: String? =
@@ -1130,7 +1186,9 @@ private fun AvailableTileGridCell(
         else null
 
     val alpha by animateFloatAsState(if (cell.isCurrent) .38f else 1f)
-    val colors = EditModeTileDefaults.editTileColors()
+    val colors =
+        if (circular) EditModeTileDefaults.circularEditTileColors()
+        else EditModeTileDefaults.editTileColors()
     val onClick: () -> Unit = {
         onAddTile(cell.tileSpec)
         if (canLayoutTile) {
@@ -1179,9 +1237,15 @@ private fun AvailableTileGridCell(
                     .fillMaxSize()
                     .borderOnFocus(
                         MaterialTheme.colorScheme.secondary,
-                        CornerSize(InactiveTileCornerRadius),
+                        CornerSize(
+                            if (circular) CircularCornerRadius else InactiveTileCornerRadius
+                        ),
                     )
-                    .tileBackground(cornerRadius = InactiveTileCornerRadius) { colors.background }
+                    .tileBackground(
+                        cornerRadius = InactiveTileCornerRadius,
+                        color = { colors.background },
+                        circular = circular,
+                    )
                     .clickable(
                         enabled = !cell.isCurrent,
                         onClick = onClick,
@@ -1189,12 +1253,32 @@ private fun AvailableTileGridCell(
                     )
             ) {
                 // Icon
-                SmallTileContent(
-                    iconProvider = { cell.icon },
-                    color = colors.icon,
-                    animateToEnd = true,
-                    modifier = Modifier.align(Alignment.Center).clearAndSetSemantics {},
-                )
+                if (circular) {
+                    // The circular style carries the color in a circular icon background and has
+                    // no pill behind the tile.
+                    Box(
+                        modifier =
+                            Modifier.align(Alignment.Center)
+                                .clearAndSetSemantics {}
+                                .size(ToggleTargetSize)
+                                .clip(RoundedCornerShape(CircularCornerRadius))
+                                .drawBehind { drawRect(colors.iconBackground) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        SmallTileContent(
+                            iconProvider = { uwuMaterialTileIcon(cell.icon) },
+                            color = colors.icon,
+                            animateToEnd = true,
+                        )
+                    }
+                } else {
+                    SmallTileContent(
+                        iconProvider = { cell.icon },
+                        color = colors.icon,
+                        animateToEnd = true,
+                        modifier = Modifier.align(Alignment.Center).clearAndSetSemantics {},
+                    )
+                }
             }
 
             StaticTileBadge(
@@ -1277,10 +1361,29 @@ fun EditTile(
     state: ResizingState,
     progress: () -> Float,
     colors: TileColors = EditModeTileDefaults.editTileColors(),
+    circular: Boolean = false,
 ) {
     val defaultStartPadding = CommonTileDefaults.StartPadding
     val iconSizeDiff = CommonTileDefaults.SmallTileIconSize - CommonTileDefaults.LargeTileIconSize
     val toggleTargetSize = ToggleTargetSize
+    // The layout modifier below always measures the tile with the width of a "large" tile so the
+    // icon to label transition is never clipped. In the circular style the content is centered
+    // under the icon instead, so the width of a single grid column (which the resize anchors hold)
+    // is the width available for the label.
+    val circularLabelWidth =
+        if (circular) {
+            val cellWidth = state.bounds.first
+            if (cellWidth != null) {
+                (with(LocalDensity.current) { cellWidth.toDp() } -
+                        CircularEditTileLabelHorizontalPadding * 2)
+                    .coerceAtLeast(1.dp)
+            } else {
+                // The anchors are not known before the grid has been laid out for the first time.
+                toggleTargetSize
+            }
+        } else {
+            toggleTargetSize
+        }
     Row(
         horizontalArrangement = spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1325,30 +1428,108 @@ fun EditTile(
                 }
                 .largeTilePadding(),
     ) {
-        // Icon
-        Box(
-            Modifier.size(ToggleTargetSize).thenIf(tile.isDualTarget) {
-                Modifier.drawBehind { drawCircle(colors.iconBackground, alpha = progress()) }
+        if (circular) {
+            // The circular style has no pill and no second line of text: the tinted icon circle is
+            // followed by the centered single line label. Everything else (the placement and the
+            // resize animation) is shared with the default style above.
+            CircularEditTileContent(
+                iconProvider = { uwuMaterialTileIcon(tile.icon) },
+                label = tile.label.text,
+                colors = colors,
+                labelWidth = circularLabelWidth,
+            )
+        } else {
+            // Icon
+            Box(
+                Modifier.size(ToggleTargetSize).thenIf(tile.isDualTarget) {
+                    Modifier.drawBehind { drawCircle(colors.iconBackground, alpha = progress()) }
+                }
+            ) {
+                SmallTileContent(
+                    iconProvider = { tile.icon },
+                    color = colors.icon,
+                    animateToEnd = true,
+                    size = { CommonTileDefaults.SmallTileIconSize - iconSizeDiff * progress() },
+                    modifier = Modifier.align(Alignment.Center),
+                )
             }
+
+            // Labels, positioned after the icon
+            LargeTileLabels(
+                label = tile.label.text,
+                secondaryLabel = tile.appName?.text,
+                colors = colors,
+                modifier = Modifier.weight(1f).graphicsLayer { this.alpha = progress() },
+            )
+        }
+    }
+}
+
+/** Horizontal padding applied to the label of a circular edit tile, so it never touches the
+ * neighbouring columns. */
+private val CircularEditTileLabelHorizontalPadding = 6.dp
+
+/** Gap between the circular icon and its label. The circle and the single label line together
+ * fill the [TileHeight] cell exactly. */
+private val CircularEditTileLabelTopPadding = 2.dp
+
+/**
+ * Circular style content of an edit tile: the color is carried by a circular background behind the
+ * icon and the label is centered right below it.
+ *
+ * The column is anchored to the start of the (possibly larger than the cell) content area, which is
+ * where the tile layout modifier places the icon, and is only [ToggleTargetSize] wide, so the
+ * centered label can overflow it symmetrically and stay centered on the circle.
+ */
+@Composable
+private fun CircularEditTileContent(
+    iconProvider: Context.() -> Icon,
+    label: String,
+    colors: TileColors,
+    labelWidth: Dp,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = spacedBy(CircularEditTileLabelTopPadding, Alignment.Top),
+        // Pin the column to the tile height so the icon always sits at the top of the tile, which
+        // keeps the circular selection decorations around the icon in place.
+        modifier = Modifier.requiredWidth(ToggleTargetSize).height(TileHeight),
+    ) {
+        Box(
+            modifier =
+                Modifier.size(ToggleTargetSize)
+                    .clip(RoundedCornerShape(CircularCornerRadius))
+                    .drawBehind { drawRect(colors.iconBackground) },
+            contentAlignment = Alignment.Center,
         ) {
             SmallTileContent(
-                iconProvider = { tile.icon },
+                iconProvider = iconProvider,
                 color = colors.icon,
                 animateToEnd = true,
-                size = { CommonTileDefaults.SmallTileIconSize - iconSizeDiff * progress() },
-                modifier = Modifier.align(Alignment.Center),
+                size = { CommonTileDefaults.LargeTileIconSize },
             )
         }
 
-        // Labels, positioned after the icon
-        LargeTileLabels(
-            label = tile.label.text,
-            secondaryLabel = tile.appName?.text,
-            colors = colors,
-            modifier = Modifier.weight(1f).graphicsLayer { this.alpha = progress() },
+        // Single line, centered and ellipsized: the circular style never shows a second label.
+        BasicText(
+            text = label,
+            color = { colors.label },
+            style = CircularEditTileLabelStyle(),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.requiredWidth(labelWidth),
         )
     }
 }
+
+/** Label style of the circular edit tiles: centered, single line. */
+@Composable
+private fun CircularEditTileLabelStyle(): TextStyle =
+    MaterialTheme.typography.labelMedium.copy(
+        fontSize = 11.sp,
+        lineHeight = 14.sp,
+        textAlign = TextAlign.Center,
+    )
 
 private fun MeasureScope.iconHorizontalCenter(
     padding: Dp,
@@ -1362,9 +1543,13 @@ private fun Modifier.tileBackground(
     cornerRadius: Dp,
     alpha: () -> Float = { 1f },
     color: () -> Color,
+    circular: Boolean = false,
 ): Modifier {
-    // Clip tile contents from overflowing past the tile
-    return clip(RoundedCornerShape(cornerRadius)).drawBehind { drawRect(color(), alpha = alpha()) }
+    // Clip tile contents from overflowing past the tile. The circular style has no pill, and the
+    // rounded tile shape would clip the corners of the circular icon and of the label below it, so
+    // the content is only clipped to the tile bounds.
+    val shape = if (circular) RectangleShape else RoundedCornerShape(cornerRadius)
+    return clip(shape).drawBehind { drawRect(color(), alpha = alpha()) }
 }
 
 private fun Modifier.keyboardShortcuts(
@@ -1420,6 +1605,28 @@ private object EditModeTileDefaults {
             secondaryLabel = MaterialTheme.colorScheme.onSurface,
             icon = MaterialTheme.colorScheme.onSurface,
         )
+
+    /**
+     * Colors of an edit tile in the circular style: the tile itself has no pill, the neutral state
+     * color is carried by the circular icon background.
+     *
+     * Edit mode has no notion of an active/inactive tile, so this uses the inactive colors of the
+     * circular style in `Tile.kt`: `surfaceEffect2` behind the icon and `onSurface` for the icon
+     * and the label. [alpha] dims them for tiles that are not directly available in the current
+     * grid, replacing the dimmed pill of the default style.
+     */
+    @Composable
+    fun circularEditTileColors(alpha: Float = 1f): TileColors {
+        val iconBackground = LocalAndroidColorScheme.current.surfaceEffect2
+        val onSurface = MaterialTheme.colorScheme.onSurface
+        return TileColors(
+            background = Color.Transparent,
+            iconBackground = iconBackground.copy(alpha = iconBackground.alpha * alpha),
+            label = onSurface.copy(alpha = alpha),
+            secondaryLabel = onSurface.copy(alpha = alpha),
+            icon = onSurface.copy(alpha = alpha),
+        )
+    }
 }
 
 private const val EDIT_MODE_ROOT_TEST_TAG = "EditModeRoot"

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    SPDX-FileCopyrightText: The uwuAOSP Project
+    SPDX-License-Identifier: Apache-2.0
+-->
+<resources>
+    <!-- Aliases identify circular icons; rendering uses AndroidX Material Icons in Compose. -->
+    <item type="drawable" name="uwu_material_airplane_off">@drawable/qs_airplane_icon_off</item>
+    <item type="drawable" name="uwu_material_airplane_on">@drawable/qs_airplane_icon_on</item>
+    <item type="drawable" name="uwu_material_battery_saver">@drawable/qs_battery_saver_icon_on</item>
+    <item type="drawable" name="uwu_material_bluetooth_off">@drawable/qs_bluetooth_icon_off</item>
+    <item type="drawable" name="uwu_material_bluetooth_on">@drawable/qs_bluetooth_icon_on</item>
+    <item type="drawable" name="uwu_material_cast">@drawable/ic_qs_cast_detail_empty</item>
+    <item type="drawable" name="uwu_material_camera">@drawable/qs_camera_access_icon_on</item>
+    <item type="drawable" name="uwu_material_dark_mode">@drawable/qs_light_dark_theme_icon_on</item>
+    <item type="drawable" name="uwu_material_dnd_off">@drawable/qs_dnd_icon_off</item>
+    <item type="drawable" name="uwu_material_dnd_on">@drawable/qs_dnd_icon_on</item>
+    <item type="drawable" name="uwu_material_flashlight_off">@drawable/qs_flashlight_icon_off</item>
+    <item type="drawable" name="uwu_material_flashlight_on">@drawable/qs_flashlight_icon_on</item>
+    <item type="drawable" name="uwu_material_location_off">@drawable/qs_location_icon_off</item>
+    <item type="drawable" name="uwu_material_location_on">@drawable/qs_location_icon_on</item>
+    <item type="drawable" name="uwu_material_mic_off">@drawable/qs_mic_access_off</item>
+    <item type="drawable" name="uwu_material_mic_on">@drawable/qs_mic_access_on</item>
+    <item type="drawable" name="uwu_material_nfc">@drawable/ic_qs_nfc</item>
+    <item type="drawable" name="uwu_material_nightlight">@drawable/qs_nightlight_icon_on</item>
+    <item type="drawable" name="uwu_material_rotation">@drawable/qs_auto_rotate_icon_on</item>
+    <item type="drawable" name="uwu_material_screen_record">@drawable/qs_screen_record_icon_on</item>
+    <item type="drawable" name="uwu_material_usb">@drawable/ic_qs_usb_tether</item>
+    <item type="drawable" name="uwu_material_wifi_off">@drawable/ic_signal_wifi_off</item>
+    <item type="drawable" name="uwu_material_wifi_on">@drawable/ic_statusbar_wifi</item>
+</resources>

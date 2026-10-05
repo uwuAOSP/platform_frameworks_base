@@ -34,7 +34,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement.spacedBy
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -73,6 +75,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.dp
@@ -102,7 +105,9 @@ import com.android.systemui.qs.footer.ui.viewmodel.FooterActionsForegroundServic
 import com.android.systemui.qs.footer.ui.viewmodel.FooterActionsSecurityButtonViewModel
 import com.android.systemui.qs.footer.ui.viewmodel.FooterActionsViewModel
 import com.android.systemui.qs.footer.ui.viewmodel.FooterTextButtonViewModel
+import com.android.systemui.qs.panels.ui.compose.toolbar.EditModeButton
 import com.android.systemui.qs.panels.ui.viewmodel.TextFeedbackViewModel
+import com.android.systemui.qs.panels.ui.viewmodel.toolbar.EditModeButtonViewModel
 import com.android.systemui.qs.shared.ui.QuickSettings
 import com.android.systemui.qs.ui.composable.QuickSettingsTheme
 import com.android.systemui.qs.ui.compose.borderOnFocus
@@ -115,6 +120,8 @@ fun ContentScope.FooterActionsWithAnimatedVisibility(
     viewModel: FooterActionsViewModel,
     isCustomizing: Boolean,
     customizingAnimationDuration: Int,
+    showForegroundServices: Boolean = true,
+    showSettings: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     AnimatedVisibility(
@@ -135,7 +142,11 @@ fun ContentScope.FooterActionsWithAnimatedVisibility(
             // This view has its own horizontal padding
             // TODO(b/321716470) This should use a lifecycle tied to the scene.
             Element(QuickSettings.Elements.FooterActions, Modifier) {
-                FooterActions(viewModel = viewModel)
+                FooterActions(
+                    viewModel = viewModel,
+                    showForegroundServices = showForegroundServices,
+                    showSettings = showSettings,
+                )
             }
         }
     }
@@ -143,7 +154,17 @@ fun ContentScope.FooterActionsWithAnimatedVisibility(
 
 /** The Quick Settings footer actions row. */
 @Composable
-fun FooterActions(viewModel: FooterActionsViewModel, modifier: Modifier = Modifier) {
+fun FooterActions(
+    viewModel: FooterActionsViewModel,
+    modifier: Modifier = Modifier,
+    /**
+     * Whether to show the running-apps indicator here. The circular style shows it in the QS header
+     * row instead ([CircularQsHeaderRow]).
+     */
+    showForegroundServices: Boolean = true,
+    /** Whether to show the settings button here. The circular style shows it in the header row. */
+    showSettings: Boolean = true,
+) {
     val context = LocalContext.current
 
     // Collect alphas as soon as we are composed, even when not visible.
@@ -234,18 +255,22 @@ fun FooterActions(viewModel: FooterActionsViewModel, modifier: Modifier = Modifi
         CompositionLocalProvider(LocalContentColor provides contentColor) {
             val useModifierBasedExpandable = true
 
+            // The circular style moves the running-apps indicator into the QS header row.
+            val visibleForegroundServices =
+                if (showForegroundServices) foregroundServices else null
+
             // The viewModel to show, in order of priority:
             // 1. Text feedback
             // 2. Security
             // 3. Foreground services
             val textViewModel: FooterTextButtonViewModel? =
                 textFeedback as? TextFeedbackViewModel.LoadedTextFeedback
-                    ?: (security ?: foregroundServices)
+                    ?: (security ?: visibleForegroundServices)
             AnimatedFooterTextButton(textViewModel, useModifierBasedExpandable, Modifier.weight(1f))
 
             // Only add the foreground services number if text shouldn't be displayed
             ForegroundServicesNumberButton(
-                { foregroundServices.takeIf { it?.model?.displayText == false } },
+                { visibleForegroundServices.takeIf { it?.model?.displayText == false } },
                 useModifierBasedExpandable,
             )
 
@@ -254,11 +279,13 @@ fun FooterActions(viewModel: FooterActionsViewModel, modifier: Modifier = Modifi
                 useModifierBasedExpandable,
                 Modifier.sysuiResTag("multi_user_switch"),
             )
-            IconButton(
-                { settings },
-                useModifierBasedExpandable,
-                Modifier.sysuiResTag("settings_button_container"),
-            )
+            if (showSettings) {
+                IconButton(
+                    { settings },
+                    useModifierBasedExpandable,
+                    Modifier.sysuiResTag("settings_button_container"),
+                )
+            }
             IconButton(
                 { viewModel.power },
                 useModifierBasedExpandable,
@@ -267,6 +294,78 @@ fun FooterActions(viewModel: FooterActionsViewModel, modifier: Modifier = Modifi
         }
     }
 }
+
+/**
+ * Circular-style QS header row, rendered above the tiles.
+ *
+ * The stock layout keeps the running-apps indicator and the settings button in the footer and the
+ * edit (pencil) button in the pager row under the tiles. The circular style groups the three of them
+ * in a single row above the tiles instead; see `QuickSettingsScene`.
+ */
+@Composable
+fun CircularQsHeaderRow(
+    footerActionsViewModel: FooterActionsViewModel,
+    editModeButtonViewModel: EditModeButtonViewModel,
+    modifier: Modifier = Modifier,
+) {
+    var foregroundServices by remember {
+        mutableStateOf<FooterActionsForegroundServicesButtonViewModel?>(null)
+    }
+    var settings by remember { mutableStateOf<FooterActionsButtonViewModel?>(null) }
+
+    LaunchedEffectWithLifecycle(
+        footerActionsViewModel.foregroundServices,
+        footerActionsViewModel.settings,
+        minActiveState = Lifecycle.State.RESUMED,
+    ) {
+        launch { footerActionsViewModel.foregroundServices.collect { foregroundServices = it } }
+        launch { footerActionsViewModel.settings.collect { settings = it } }
+    }
+
+    QuickSettingsTheme {
+        BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+            val qsHorizontalMargin = dimensionResource(R.dimen.qs_horizontal_margin)
+            val qsColumnSpacing = dimensionResource(R.dimen.qs_tile_margin_horizontal)
+            val circularIconSize =
+                dimensionResource(R.dimen.common_tile_default_toggle_target_size)
+            val columnWidth =
+                (maxWidth - qsHorizontalMargin * 2 -
+                        qsColumnSpacing * (CIRCULAR_QS_COLUMN_COUNT - 1)) /
+                    CIRCULAR_QS_COLUMN_COUNT
+            // Use the visible circle bounds rather than the grid cell bounds. Applying the same
+            // inset at both ends aligns the chip with the first tile and settings with the fourth.
+            val actionsHorizontalPadding =
+                (qsHorizontalMargin + (columnWidth - circularIconSize) / 2).coerceAtLeast(0.dp)
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = actionsHorizontalPadding),
+                horizontalArrangement = spacedBy(CircularHeaderItemSpacing),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val useModifierBasedExpandable = true
+
+                // Running-apps indicator, same as the footer's text chip. The number counter that
+                // the footer adds when the chip has no text is deliberately left out here: it is
+                // redundant next to the chip and made the row too crowded.
+                AnimatedFooterTextButton(
+                    foregroundServices,
+                    useModifierBasedExpandable,
+                    Modifier.weight(1f),
+                    horizontalPadding = 0.dp,
+                )
+                EditModeButton(editModeButtonViewModel)
+                IconButton(
+                    { settings },
+                    useModifierBasedExpandable,
+                    Modifier.sysuiResTag("settings_button_container"),
+                )
+            }
+        }
+    }
+}
+
+private const val CIRCULAR_QS_COLUMN_COUNT = 4
+private val CircularHeaderItemSpacing = 8.dp
 
 /**
  * Animated text button for [FooterTextButtonViewModel].
@@ -279,6 +378,7 @@ private fun AnimatedFooterTextButton(
     textViewModel: FooterTextButtonViewModel?,
     useModifierBasedExpandable: Boolean,
     modifier: Modifier = Modifier,
+    horizontalPadding: Dp = 4.dp,
 ) {
     val transition = updateTransition(textViewModel?.model)
     val scaleY by transition.animateFloat { if (it == null) FOOTER_TEXT_MINIMUM_SCALE_Y else 1f }
@@ -301,7 +401,7 @@ private fun AnimatedFooterTextButton(
             color = colors.background,
             contentColor = colors.content,
             borderStroke = colors.border,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = horizontalPadding),
             onClick = onClick,
             useModifierBasedImplementation = useModifierBasedExpandable,
         ) {

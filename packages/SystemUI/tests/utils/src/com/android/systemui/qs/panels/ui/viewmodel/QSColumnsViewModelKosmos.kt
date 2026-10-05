@@ -20,6 +20,7 @@ import com.android.systemui.kosmos.Kosmos
 import com.android.systemui.media.remedia.ui.compose.MediaUiBehavior
 import com.android.systemui.qs.panels.domain.interactor.largeTileSpanInteractor
 import com.android.systemui.qs.panels.domain.interactor.qsColumnsInteractor
+import org.uwuaosp.systemui.qsstyle.qsStyleRepository
 
 val Kosmos.qsColumnsViewModelFactory by
     Kosmos.Fixture {
@@ -29,11 +30,12 @@ val Kosmos.qsColumnsViewModelFactory by
                 mediaUiBehavior: MediaUiBehavior?,
             ): QSColumnsViewModel {
                 return QSColumnsViewModel(
-                    qsColumnsInteractor,
-                    mediaInRowInLandscapeViewModelFactory,
-                    largeTileSpanInteractor,
-                    mediaLocation,
-                    mediaUiBehavior,
+                    interactor = qsColumnsInteractor,
+                    mediaInRowInLandscapeViewModelFactory = mediaInRowInLandscapeViewModelFactory,
+                    largeTileSpanInteractor = largeTileSpanInteractor,
+                    qsStyleRepository = qsStyleRepository,
+                    mediaLocation = mediaLocation,
+                    mediaUiBehavior = mediaUiBehavior,
                 )
             }
         }

@@ -16,7 +16,12 @@
 
 package com.android.systemui.brightness.ui.viewmodel
 
+import android.content.ContentResolver
 import android.content.Context
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import androidx.annotation.DrawableRes
 import androidx.annotation.FloatRange
 import androidx.annotation.StringRes
@@ -29,6 +34,8 @@ import com.android.systemui.classifier.Classifier
 import com.android.systemui.classifier.domain.interactor.FalsingInteractor
 import com.android.systemui.common.shared.model.Icon
 import com.android.systemui.common.shared.model.asIcon
+import com.android.systemui.dagger.qualifiers.Application
+import com.android.systemui.dagger.qualifiers.Background
 import com.android.systemui.graphics.ImageLoader
 import com.android.systemui.haptics.slider.compose.ui.SliderHapticsViewModel
 import com.android.systemui.lifecycle.HydratedActivatable
@@ -39,8 +46,16 @@ import dagger.Lazy
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withTimeoutOrNull
+import org.uwuaosp.systemui.qsstyle.QSStyleRepository
+import org.uwuaosp.systemui.qsstyle.QSTileStyle
 
 /**
  * View Model for a brightness slider.
@@ -62,7 +77,91 @@ constructor(
     @Assisted val supportsMirroring: Boolean,
     private val brightnessWarningToast: BrightnessWarningToast,
     private val imageLoader: ImageLoader,
+    qsStyleRepository: QSStyleRepository? = null,
+    @Application private val applicationContext: Context? = null,
+    @Background private val backgroundScope: CoroutineScope? = null,
 ) : HydratedActivatable() {
+
+    /**
+     * Active Quick Settings style, read straight from [QSStyleRepository].
+     *
+     * The flow is not hydrated, so the brightness slider always renders with the style that is
+     * currently persisted in `Settings.Secure.UWU_QS_STYLE` (mirroring the pattern used by
+     * `InfiniteGridViewModel.tileStyleFlow`).
+     *
+     * [qsStyleRepository] is nullable with a default so that manually constructed instances (for
+     * example the test fixtures, which are outside this change's write scope) keep compiling and
+     * simply fall back to the default style.
+     */
+    val tileStyleFlow: StateFlow<QSTileStyle> =
+        qsStyleRepository?.style ?: MutableStateFlow(QSTileStyle.DEFAULT)
+
+    private val autoBrightnessResolver: ContentResolver? = applicationContext?.contentResolver
+
+    /**
+     * Whether adaptive brightness is on, i.e. `Settings.System.SCREEN_BRIGHTNESS_MODE` is
+     * [Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC].
+     *
+     * This is what the circular style's auto-brightness button renders. The value is observed
+     * through a [ContentObserver] so it also follows changes made from the Quick Settings tile (or
+     * anywhere else), and the observer is only registered while something is collecting (i.e. while
+     * the circular slider is on screen).
+     *
+     * There is no reusable auto-brightness interactor in this build (`pods/brightness` only exposes
+     * gamma brightness and the legacy `AutoBrightnessTile` talks to `Settings.System` directly), so
+     * this follows the same key as that tile.
+     *
+     * The constructor dependencies are nullable with defaults so that manually constructed
+     * instances (test fixtures, outside this change's write scope) keep compiling; they then report
+     * `false` and ignore writes.
+     *
+     * Lazily created, so the default (non circular) style never even reads the setting.
+     */
+    val isAutoBrightnessEnabled: StateFlow<Boolean> by lazy { createAutoBrightnessFlow() }
+
+    private fun createAutoBrightnessFlow(): StateFlow<Boolean> {
+        val resolver = autoBrightnessResolver
+        val scope = backgroundScope
+        if (resolver == null || scope == null) {
+            return MutableStateFlow(false)
+        }
+        return callbackFlow {
+                val observer =
+                    object : ContentObserver(Handler(Looper.getMainLooper())) {
+                        override fun onChange(selfChange: Boolean) {
+                            trySend(readAutoBrightnessEnabled())
+                        }
+                    }
+                resolver.registerContentObserver(
+                    Settings.System.getUriFor(Settings.System.SCREEN_BRIGHTNESS_MODE),
+                    false,
+                    observer,
+                )
+                trySend(readAutoBrightnessEnabled())
+                awaitClose { resolver.unregisterContentObserver(observer) }
+            }
+            .stateIn(scope, SharingStarted.WhileSubscribed(5_000L), readAutoBrightnessEnabled())
+    }
+
+    /** Turns adaptive brightness on or off; the observed [isAutoBrightnessEnabled] follows. */
+    fun setAutoBrightnessEnabled(enabled: Boolean) {
+        val resolver = autoBrightnessResolver ?: return
+        Settings.System.putInt(
+            resolver,
+            Settings.System.SCREEN_BRIGHTNESS_MODE,
+            if (enabled) Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
+            else Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL,
+        )
+    }
+
+    private fun readAutoBrightnessEnabled(): Boolean =
+        autoBrightnessResolver?.let {
+            Settings.System.getInt(
+                it,
+                Settings.System.SCREEN_BRIGHTNESS_MODE,
+                Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL,
+            ) != Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+        } ?: false
 
     init {
         if (supportsMirroring) {

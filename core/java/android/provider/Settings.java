@@ -14786,6 +14786,50 @@ public final class Settings {
         public static final String STATUS_BAR_LYRIC_SOURCES = "status_bar_lyric_sources";
 
         /**
+         * Selects the Quick Settings tile style used by SystemUI.
+         * <ul>
+         *    <li> 0 = default tile style </li>
+         *    <li> 1 = circular tile style, with a 5 column Quick QS panel </li>
+         * </ul>
+         * Changes take effect immediately, without restarting SystemUI.
+         *
+         * @hide
+         */
+        @Readable
+        public static final String UWU_QS_STYLE = "uwu_qs_style";
+
+        /**
+         * Selects where the brightness slider is placed in the Quick Settings panel.
+         * <ul>
+         *    <li> 0 = above the tiles (stock position) </li>
+         *    <li> 1 = below the tiles </li>
+         * </ul>
+         * When unset, the position follows {@link #UWU_QS_STYLE}: the circular style places the
+         * slider below the tiles and the default style keeps the stock position above them.
+         * Changes take effect immediately, without restarting SystemUI.
+         *
+         * @hide
+         */
+        @Readable
+        public static final String UWU_QS_BRIGHTNESS_SLIDER_POSITION =
+                "uwu_qs_brightness_slider_position";
+
+        /**
+         * Selects where the brightness slider is shown in the Quick Settings panel.
+         * <ul>
+         *    <li> 0 = hidden </li>
+         *    <li> 1 = shown in Quick Settings only </li>
+         *    <li> 2 = shown in Quick Settings and Quick Quick Settings </li>
+         * </ul>
+         * Changes take effect immediately, without restarting SystemUI.
+         *
+         * @hide
+         */
+        @Readable
+        public static final String UWU_QS_SHOW_BRIGHTNESS_SLIDER =
+                "uwu_qs_show_brightness_slider";
+
+        /**
          * Whether connected external displays use the system desktop experience.
          *
          * @hide

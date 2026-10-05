@@ -39,6 +39,7 @@ import androidx.compose.foundation.overscroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -83,6 +84,7 @@ import com.android.systemui.notifications.intelligence.rules.ui.viewmodel.Notifi
 import com.android.systemui.notifications.ui.composable.HeadsUpNotificationPlaceholder
 import com.android.systemui.notifications.ui.composable.ScrollingNotificationPanel
 import com.android.systemui.qs.composefragment.ui.GridAnchor
+import com.android.systemui.qs.footer.ui.compose.CircularQsHeaderRow
 import com.android.systemui.qs.footer.ui.compose.FooterActionsWithAnimatedVisibility
 import com.android.systemui.qs.panels.ui.compose.EditMode
 import com.android.systemui.qs.shared.ui.QuickSettings
@@ -96,6 +98,7 @@ import com.android.systemui.scene.shared.model.Scenes
 import com.android.systemui.scene.ui.composable.Scene
 import com.android.systemui.shade.ui.composable.CollapsedShadeHeader
 import com.android.systemui.shade.ui.composable.ExpandedShadeHeader
+import com.android.systemui.shade.ui.composable.ShadeHeader
 import com.android.systemui.shade.ui.composable.ShadePanelScrim
 import com.android.systemui.shade.ui.viewmodel.ShadeHeaderViewModel
 import com.android.systemui.statusbar.notification.stack.ui.view.NotificationScrollView
@@ -397,6 +400,15 @@ private fun ContentScope.QuickSettingsContent(
         // ############# Media ###############
         val mediaInRow = viewModel.qsContainerViewModel.showMediaInRow
 
+        // ############# Circular style ###############
+        // The circular style hosts the running-apps indicator, the edit (pencil) button and the
+        // settings button in a row above the tiles, like the reference layout, instead of in the
+        // footer and in the pager row.
+        val tileStyle by viewModel.qsContainerViewModel.brightnessSliderViewModel.tileStyleFlow
+            .collectAsState()
+        val circular = tileStyle.isCircular
+        val circularHeaderVisible = circular && layoutState.isIdle(Scenes.QuickSettings)
+
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier =
@@ -428,6 +440,38 @@ private fun ContentScope.QuickSettingsContent(
                         }
                     }
                     Spacer(modifier = Modifier.height(16.dp))
+                    if (circular) {
+                        CircularQsHeaderRow(
+                            footerActionsViewModel = footerActionsViewModel,
+                            editModeButtonViewModel =
+                                rememberViewModel(traceName = "CircularQsHeaderRow") {
+                                    viewModel.getEditModeButtonViewModel()
+                                },
+                            modifier =
+                                Modifier.padding(horizontal = shadeHorizontalPadding)
+                                    // Reuse the exact date/battery header alpha so the three
+                                    // circular actions appear with that header's animation.
+                                    .graphicsLayer {
+                                        val fallbackAlpha = if (circularHeaderVisible) 1f else 0f
+                                        val expandedHeaderAlpha =
+                                            ShadeHeader.Elements.ExpandedContent.currentAlpha()
+                                        val collapsedHeaderAlpha =
+                                            minOf(
+                                                ShadeHeader.Elements.CollapsedContentStart
+                                                    .currentAlpha()
+                                                    ?: fallbackAlpha,
+                                                ShadeHeader.Elements.CollapsedContentEnd
+                                                    .currentAlpha()
+                                                    ?: fallbackAlpha,
+                                            )
+                                        alpha = expandedHeaderAlpha ?: collapsedHeaderAlpha
+                                    }
+                                    .thenIf(!circularHeaderVisible) {
+                                        Modifier.gesturesDisabled()
+                                    },
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
                     QuickSettingsContent(
                         viewModel.qsContainerViewModel,
                         mediaInRow,
@@ -440,6 +484,8 @@ private fun ContentScope.QuickSettingsContent(
                 viewModel = footerActionsViewModel,
                 isCustomizing = false,
                 customizingAnimationDuration = 0,
+                showForegroundServices = !circular,
+                showSettings = !circular,
                 modifier =
                     Modifier.align(Alignment.CenterHorizontally)
                         .sysuiResTag("qs_footer_actions")

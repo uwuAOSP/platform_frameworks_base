@@ -34,6 +34,8 @@ object QuickSettings {
         val GridAnchor = ElementKey("QuickSettingsGridAnchor")
         val FooterActions = ElementKey("QuickSettingsFooterActions")
         val BrightnessSlider = ElementKey("BrightnessSlider")
+        /** Circular QQS/QS brightness slider shared across the shade and QS scenes. */
+        val CircularBrightnessSlider = ElementKey("CircularBrightnessSlider")
 
         fun TileSpec.toElementKey() =
             ElementKey(this.spec, TileIdentity(this), contentPicker = SharedQsTileContentPicker)

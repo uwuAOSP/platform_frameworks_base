@@ -28,7 +28,10 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import org.uwuaosp.systemui.qsstyle.QSStyleRepository
+import org.uwuaosp.systemui.qsstyle.QSTileStyle
 
 class InfiniteGridViewModel
 @AssistedInject
@@ -39,8 +42,18 @@ constructor(
     val snapshotViewModelFactory: InfiniteGridSnapshotViewModel.Factory,
     val resetDialogDelegateFactory: QSResetDialogDelegate.Factory,
     val editTopBarActionsViewModelFactory: EditTopBarActionsViewModel.Factory,
+    qsStyleRepository: QSStyleRepository,
 ) : ExclusiveActivatable(), PaginatableViewModel {
     private val hydrator = Hydrator("InfiniteGridViewModel.hydrator")
+
+    /**
+     * Raw style flow, observed directly by the tile composables. This does not go through the
+     * hydrator, so the tiles always pick up the style that the grids were laid out with.
+     */
+    val tileStyleFlow: StateFlow<QSTileStyle> = qsStyleRepository.style
+
+    /** Active tile style, kept as snapshot state so changes re-split the grid immediately. */
+    private val qsStyle by hydrator.hydratedStateOf(qsStyleRepository.style)
 
     val iconTilesViewModel = dynamicIconTilesViewModelFactory.create()
     val columnsWithMediaViewModel =
@@ -55,6 +68,7 @@ constructor(
                 columnsWithMediaViewModel.columns,
                 columnsWithMediaViewModel.largeSpan,
                 iconTilesViewModel.largeTilesState.value,
+                qsStyle,
             )
 
     override fun splitIntoPages(tiles: List<TileViewModel>, rows: Int): List<List<TileViewModel>> {
@@ -67,6 +81,8 @@ constructor(
     }
 
     private fun widthOf(spec: TileSpec): Int {
+        // The circular style forces every tile to a single cell.
+        if (qsStyle.isCircular) return 1
         return if (iconTilesViewModel.largeTilesState.value.contains(spec))
             columnsWithMediaViewModel.largeSpan
         else 1

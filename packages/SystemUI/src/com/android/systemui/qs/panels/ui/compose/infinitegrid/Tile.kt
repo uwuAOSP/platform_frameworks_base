@@ -27,10 +27,13 @@ import androidx.annotation.VisibleForTesting
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Indication
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Arrangement.spacedBy
@@ -39,6 +42,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +57,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -92,6 +97,9 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults.ActiveTileCornerRadius
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults.InactiveIconCornerRadius
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults.InactiveTileCornerRadius
+import org.uwuaosp.systemui.qsstyle.CircularCornerRadius
+import org.uwuaosp.systemui.qsstyle.CircularTileHeight
+import org.uwuaosp.systemui.qsstyle.LocalQSTileStyle
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults.TileHeight
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults.longPressLabelMoreDetails
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults.longPressLabelSettings
@@ -148,6 +156,11 @@ fun ContentScope.Tile(
     requestToggleTextFeedback: (TileSpec) -> Unit = {},
     detailsViewModel: DetailsViewModel?,
     enableRevealEffect: Boolean = false,
+    /**
+     * Whether the circular uwuAOSP style is active. Passed explicitly by the grids (instead of
+     * relying on a composition local alone) so the style is always in sync with the view models.
+     */
+    circular: Boolean = LocalQSTileStyle.current.isCircular,
 ) {
     trace(tile.traceName) {
         val currentBounceableInfo by rememberUpdatedState(bounceableInfo)
@@ -169,14 +182,17 @@ fun ContentScope.Tile(
                 tile.state.collect { value = it.toIconProvider() }
             }
 
-        val colors = TileDefaults.getColorForState(uiState, iconOnly)
+        val colors = TileDefaults.getColorForState(uiState, iconOnly, circular)
         val hapticsViewModel: TileHapticsViewModel =
             rememberViewModel(traceName = "TileHapticsViewModel") {
                 tileHapticsViewModelFactory.create(tile)
             }
 
         // TODO(b/361789146): Draw the shapes instead of clipping
-        val tileShape by TileDefaults.animateTileShapeAsState(uiState)
+        // In the circular style this is a circle. It is only used for the focus ring of the tile
+        // and for the Expandable of the default style: the circular style hosts its Expandable on
+        // the icon, whose own size already makes that shape a circle.
+        val tileShape by TileDefaults.animateTileShapeAsState(uiState, circular)
         val animatedColor by animateColorAsState(colors.background, label = "QSTileBackgroundColor")
         val isDualTarget = uiState.handlesToggleClick
         val hasLongClickEffect = uiState.hasLongClickEffect
@@ -219,136 +235,267 @@ fun ContentScope.Tile(
             modifier = modifier,
             enabled = Flags.enableQsTileTooltips(),
         ) { modifier ->
-            TileExpandable(
-                expandable = expandable,
-                color = { animatedColor },
-                shape = tileShape,
-                squishiness = squishiness,
-                hapticsViewModel = hapticsViewModel.takeIf { hasLongClickEffect },
-                modifier =
-                    modifier
-                        .then(surfaceRevealModifier)
-                        .borderOnFocus(
-                            color = MaterialTheme.colorScheme.secondary,
-                            tileShape.topEnd,
-                        )
-                        .sysuiResTag("tile_expandable")
-                        .fillMaxWidth()
-                        .bounceable(
+            val tileModifier =
+                modifier
+                    .then(surfaceRevealModifier)
+                    .borderOnFocus(
+                        color = MaterialTheme.colorScheme.secondary,
+                        tileShape.topEnd,
+                    )
+                    .sysuiResTag("tile_expandable")
+                    .fillMaxWidth()
+                    .thenIf(!circular) {
+                        Modifier.bounceable(
                             currentBounceableInfo.bounceable,
                             currentBounceableInfo.previousTile,
                             currentBounceableInfo.nextTile,
                             orientation = Orientation.Horizontal,
                             bounceEnd = currentBounceableInfo.bounceEnd,
                             interactionSource = interactionSource,
-                        ),
-            ) { expandable ->
-                // Use main click on long press for small, available dual target tiles.
-                // Open settings otherwise.
-                val useLongClickToSettings = !(iconOnly && isDualTarget && isClickable)
-                val longClick: (() -> Unit)? =
-                    {
-                            if (hasLongClickEffect) {
-                                hapticsViewModel.setTileInteractionState(
-                                    TileHapticsViewModel.TileInteractionState.LONG_CLICKED
-                                )
-                            }
-
-                            if (useLongClickToSettings) {
-                                tile.settingsClick(expandable)
-                            } else {
-                                val hasDetails =
-                                    QsDetailedView.isEnabled &&
-                                        detailsViewModel?.onTileClicked(tile.spec) == true
-                                if (!hasDetails) {
-                                    tile.mainClick(expandable)
-                                }
-                            }
-                        }
-                        .takeIf { !useLongClickToSettings || uiState.handlesSettingsClick }
-
-                // Bounce the tile's container if it is toggleable and is not a large
-                // dual target tile. These don't toggle on main click.
-                val bounceContainer = uiState.isToggleable && (iconOnly || !isDualTarget)
-                TileContainer(
-                    interactionSource = interactionSource.takeIf { bounceContainer },
-                    onClick = onClick@{
-                            if (!isClickable) return@onClick
-
-                            if (iconOnly && isDualTarget) {
-                                tile.toggleClick()
-                            } else {
-                                val hasDetails =
-                                    QsDetailedView.isEnabled &&
-                                        detailsViewModel?.onTileClicked(tile.spec) == true
-                                if (hasDetails) return@onClick
-
-                                // For those tile's who doesn't have a detailed view, process with
-                                // their `onClick` behavior.
-                                tile.mainClick(expandable)
-                            }
-
-                            // Side effects of the click
-                            hapticsViewModel.setTileInteractionState(
-                                TileHapticsViewModel.TileInteractionState.CLICKED
-                            )
-
-                            coroutineScope.launch {
-                                // Bounce the content of the tile if we're not animating the
-                                // container.
-                                if (!bounceContainer) {
-                                    currentBounceableInfo.bounceable.animateContentBounce(iconOnly)
-                                }
-                            }
-                            if (uiState.isToggleable && iconOnly) {
-                                // And show footer text feedback for icons
-                                requestToggleTextFeedback(tile.spec)
-                            }
-                        },
-                    onLongClick = longClick,
-                    accessibilityUiState = uiState.accessibilityUiState,
-                    iconOnly = iconOnly,
-                    isDualTarget = isDualTarget,
-                    modifier = contentRevealModifier,
-                ) {
-                    val iconProvider: Context.() -> Icon = { getTileIcon(icon = icon) }
-                    if (iconOnly) {
-                        SmallTileContent(
-                            iconProvider = iconProvider,
-                            color = colors.icon,
-                            modifier =
-                                Modifier.align(Alignment.Center).bounceScale {
-                                    currentBounceableInfo.bounceable.iconBounceScale
-                                },
                         )
-                    } else {
-                        val iconShape by TileDefaults.animateIconShapeAsState(uiState)
-                        val secondaryClick: (() -> Unit)? =
-                            {
-                                    hapticsViewModel.setTileInteractionState(
-                                        TileHapticsViewModel.TileInteractionState.CLICKED
-                                    )
-                                    tile.toggleClick()
-                                }
-                                .takeIf { isDualTarget }
+                    }
+
+            // Use main click on long press for small, available dual target tiles.
+            // Open settings otherwise.
+            val useLongClickToSettings = !(iconOnly && isDualTarget && isClickable)
+            val handlesLongClick = !useLongClickToSettings || uiState.handlesSettingsClick
+
+            // Bounce the tile's container if it is toggleable and is not a large
+            // dual target tile. These don't toggle on main click.
+            val bounceContainer = uiState.isToggleable && (iconOnly || !isDualTarget)
+            val clickInteractionSource = interactionSource.takeIf { bounceContainer }
+
+            fun handleClick(expandable: Expandable) {
+                if (!isClickable) return
+
+                if (iconOnly && isDualTarget) {
+                    tile.toggleClick()
+                } else {
+                    val hasDetails =
+                        QsDetailedView.isEnabled &&
+                            detailsViewModel?.onTileClicked(tile.spec) == true
+                    if (hasDetails) return
+
+                    // For those tile's who doesn't have a detailed view, process with
+                    // their `onClick` behavior.
+                    tile.mainClick(expandable)
+                }
+
+                // Side effects of the click
+                hapticsViewModel.setTileInteractionState(
+                    TileHapticsViewModel.TileInteractionState.CLICKED
+                )
+
+                coroutineScope.launch {
+                    // Bounce the content of the tile if we're not animating the container.
+                    if (!bounceContainer) {
+                        currentBounceableInfo.bounceable.animateContentBounce(iconOnly)
+                    }
+                }
+                if (uiState.isToggleable && iconOnly) {
+                    // And show footer text feedback for icons
+                    requestToggleTextFeedback(tile.spec)
+                }
+            }
+
+            fun handleLongClick(expandable: Expandable) {
+                if (hasLongClickEffect) {
+                    hapticsViewModel.setTileInteractionState(
+                        TileHapticsViewModel.TileInteractionState.LONG_CLICKED
+                    )
+                }
+
+                if (useLongClickToSettings) {
+                    tile.settingsClick(expandable)
+                } else {
+                    val hasDetails =
+                        QsDetailedView.isEnabled &&
+                            detailsViewModel?.onTileClicked(tile.spec) == true
+                    if (!hasDetails) {
+                        tile.mainClick(expandable)
+                    }
+                }
+            }
+
+            // The circular style moves the press feedback from the whole tile to the icon (like the
+            // reference implementation, where the ripple lives on the 56dp icon). The icon observes
+            // the same interaction source the tile clickable emits its presses on, and the tile
+            // itself draws no indication at all.
+            val rippleInteractionSource =
+                if (circular) remember { MutableInteractionSource() } else null
+            val pressInteractionSource = clickInteractionSource ?: rippleInteractionSource
+
+            // The click target of the circular style is composed outside of the Expandable, which
+            // only hosts the icon, so the haptics aware Expandable cannot come from its content.
+            // Resolve it on demand: with the non dynamic target resolution implementation the
+            // transition source is only registered while the Expandable composes, so wrapping it
+            // eagerly would snapshot an empty set of sources.
+            val stateAwareExpandable = {
+                hapticsViewModel
+                    .takeIf { hasLongClickEffect }
+                    ?.createStateAwareExpandable(expandable)
+                    ?: expandable
+            }
+
+            // Content of the tile, shared by both styles.
+            //
+            // The circular style hosts the [Expandable] on the icon itself (see
+            // [CircularIconExpandable]) instead of on the whole tile, so its launch/return
+            // animations morph into a circle centred on the icon, and the labels composed below
+            // the icon stay outside of that circular clip.
+            val tileContent: @Composable BoxScope.(Expandable) -> Unit = { contentExpandable ->
+                // Clicks always go through the haptics aware Expandable. The circular style is
+                // given the raw Expandable here (the one hosting the icon, on which sources may be
+                // registered) and resolves the wrapper on demand, while the default style already
+                // receives the wrapped one from [TileExpandable].
+                fun clickExpandable(): Expandable =
+                    if (circular) stateAwareExpandable() else contentExpandable
+
+                val iconProvider: Context.() -> Icon = {
+                    getTileIcon(icon = icon, circular = circular)
+                }
+                if (iconOnly) {
+                    if (circular) {
+                        // QQS keeps the same circular icon/label layout as QS. Its labels are
+                        // transparent placeholders, which prevents the shared element from
+                        // changing size or moving vertically when QS expands.
+                        val iconShape by TileDefaults.animateIconShapeAsState(uiState, circular)
                         LargeTileContent(
                             label = uiState.label,
                             secondaryLabel = uiState.secondaryLabel,
                             iconProvider = iconProvider,
-                            sideDrawable = uiState.sideDrawable,
+                            sideDrawable = null,
                             colors = colors,
                             iconShape = iconShape,
-                            toggleClick = secondaryClick,
-                            onLongClick = longClick,
-                            accessibilityUiState = uiState.accessibilityUiState,
                             squishiness = squishiness,
                             isVisible = isVisible,
-                            textScale = { currentBounceableInfo.bounceable.textBounceScale },
-                            modifier =
+                            circular = true,
+                            circularLabelsVisible = false,
+                            expandable = contentExpandable,
+                            pressInteractionSource = pressInteractionSource,
+                        )
+                    } else {
+                        val iconContent: @Composable () -> Unit = {
+                            SmallTileContent(
+                                iconProvider = iconProvider,
+                                color = colors.icon,
+                                modifier =
+                                    Modifier.bounceScale {
+                                        currentBounceableInfo.bounceable.iconBounceScale
+                                    },
+                            )
+                        }
+                        Box(
+                            modifier = Modifier.align(Alignment.Center),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            iconContent()
+                        }
+                    }
+                } else {
+                    val iconShape by TileDefaults.animateIconShapeAsState(uiState, circular)
+                    val secondaryClick: (() -> Unit)? =
+                        {
+                                hapticsViewModel.setTileInteractionState(
+                                    TileHapticsViewModel.TileInteractionState.CLICKED
+                                )
+                                tile.toggleClick()
+                            }
+                            .takeIf { isDualTarget }
+                    LargeTileContent(
+                        label = uiState.label,
+                        secondaryLabel = uiState.secondaryLabel,
+                        iconProvider = iconProvider,
+                        sideDrawable = uiState.sideDrawable,
+                        colors = colors,
+                        iconShape = iconShape,
+                        toggleClick = secondaryClick,
+                        onLongClick =
+                            if (handlesLongClick) {
+                                { handleLongClick(clickExpandable()) }
+                            } else {
+                                null
+                            },
+                        accessibilityUiState = uiState.accessibilityUiState,
+                        squishiness = squishiness,
+                        isVisible = isVisible,
+                        textScale = { currentBounceableInfo.bounceable.textBounceScale },
+                        showExpandChevron = uiState.showExpandChevron,
+                        modifier =
+                            if (circular) {
+                                Modifier
+                            } else {
                                 Modifier.largeTilePadding(
                                     isDualTarget = uiState.handlesSettingsClick
-                                ),
-                        )
+                                )
+                            },
+                        circular = circular,
+                        expandable = contentExpandable,
+                        pressInteractionSource = pressInteractionSource,
+                    )
+                }
+            }
+
+            if (circular) {
+                /*
+                 * The circular style has no tile background, so the tile is not clipped to a
+                 * rounded rectangle anymore: clipToBounds() only keeps the (squished) content
+                 * inside its own tile, while the circular shape lives on the icon that hosts the
+                 * Expandable.
+                 */
+                val circularLongClick: (() -> Unit)? =
+                    if (handlesLongClick) {
+                        { handleLongClick(stateAwareExpandable()) }
+                    } else {
+                        null
+                    }
+                TileContainer(
+                    interactionSource = pressInteractionSource,
+                    onClick = { handleClick(stateAwareExpandable()) },
+                    onLongClick = circularLongClick,
+                    accessibilityUiState = uiState.accessibilityUiState,
+                    iconOnly = iconOnly,
+                    isDualTarget = isDualTarget,
+                    circular = true,
+                    // The press feedback is drawn on the icon instead of on the whole tile.
+                    indication = null,
+                    modifier =
+                        tileModifier
+                            .then(contentRevealModifier)
+                            .clipToBounds()
+                            .motionTestValues {
+                                squishiness() exportAs TileMotionTestKeys.Squishness
+                            }
+                            .verticalSquish(squishiness),
+                ) {
+                    tileContent(expandable)
+                }
+            } else {
+                TileExpandable(
+                    expandable = expandable,
+                    color = { animatedColor },
+                    shape = tileShape,
+                    squishiness = squishiness,
+                    hapticsViewModel = hapticsViewModel.takeIf { hasLongClickEffect },
+                    modifier = tileModifier,
+                ) { expandable ->
+                    val longClick: (() -> Unit)? =
+                        if (handlesLongClick) {
+                            { handleLongClick(expandable) }
+                        } else {
+                            null
+                        }
+                    TileContainer(
+                        interactionSource = clickInteractionSource,
+                        onClick = { handleClick(expandable) },
+                        onLongClick = longClick,
+                        accessibilityUiState = uiState.accessibilityUiState,
+                        iconOnly = iconOnly,
+                        isDualTarget = isDualTarget,
+                        circular = circular,
+                        modifier = contentRevealModifier,
+                    ) {
+                        tileContent(expandable)
                     }
                 }
             }
@@ -380,6 +527,35 @@ private fun TileExpandable(
     }
 }
 
+/**
+ * Hosts the launch/return transition of a circular tile on the icon.
+ *
+ * Unlike [TileExpandable], which is hosted by the whole tile, the [Expandable] bounds here are
+ * exactly the 56dp icon. That makes the shape derived from those bounds (see
+ * `TransitionDelegate.createAnimatorState`) a circle, so dialogs and activities expand from and
+ * return into a circle centred on the icon instead of into the rounded rectangle of the tile.
+ *
+ * The labels of the tile are composed outside of this Expandable, so they can never be clipped by
+ * the circular shape.
+ */
+@Composable
+internal fun CircularIconExpandable(
+    expandable: Expandable,
+    color: () -> Color,
+    shape: Shape,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Expandable(
+        expandable = expandable,
+        controller = rememberExpandableController(color = color, shape = shape),
+        modifier = modifier.clip(shape),
+        useModifierBasedImplementation = true,
+    ) {
+        content()
+    }
+}
+
 @Composable
 fun TileContainer(
     onClick: (() -> Unit)?,
@@ -389,12 +565,14 @@ fun TileContainer(
     isDualTarget: Boolean,
     interactionSource: MutableInteractionSource?,
     modifier: Modifier = Modifier,
+    circular: Boolean = LocalQSTileStyle.current.isCircular,
+    indication: Indication? = LocalIndication.current,
     content: @Composable BoxScope.() -> Unit,
 ) {
     Box(
         modifier =
             modifier
-                .height(TileHeight)
+                .height(if (circular) CircularTileHeight else TileHeight)
                 .fillMaxWidth()
                 .tileCombinedClickable(
                     onClick = onClick ?: {},
@@ -403,6 +581,7 @@ fun TileContainer(
                     iconOnly = iconOnly,
                     isDualTarget = isDualTarget,
                     interactionSource = interactionSource,
+                    indication = indication,
                 )
                 .tileTestTag(iconOnly),
         content = content,
@@ -461,10 +640,13 @@ fun LargeStaticTile(
     }
 }
 
-private fun Context.getTileIcon(icon: IconProvider): Icon {
+private fun Context.getTileIcon(icon: IconProvider, circular: Boolean = false): Icon {
     return icon.icon?.let {
         if (it is QSTileImpl.ResourceIcon) {
-            Icon.Resource(it.resId, null)
+            Icon.Resource(
+                if (circular) uwuMaterialTileIconResource(it.resId) ?: it.resId else it.resId,
+                null,
+            )
         } else {
             Icon.Loaded(it.getDrawable(this), null)
         }
@@ -483,6 +665,7 @@ fun Modifier.tileCombinedClickable(
     interactionSource: MutableInteractionSource?,
     iconOnly: Boolean,
     isDualTarget: Boolean,
+    indication: Indication? = LocalIndication.current,
 ): Modifier {
     val longPressLabel =
         if (iconOnly && isDualTarget) longPressLabelMoreDetails() else longPressLabelSettings()
@@ -493,6 +676,7 @@ fun Modifier.tileCombinedClickable(
             onLongClickLabel = longPressLabel,
             hapticFeedbackEnabled = false, // Haptics handled separately
             interactionSource = interactionSource,
+            indication = indication,
         )
         .semantics {
             val accessibilityRole =
@@ -586,9 +770,65 @@ private object TileDefaults {
         )
     }
 
+    /**
+     * Colors for the circular style: the state color is carried by the circular icon background,
+     * the tile itself has no pill, and labels keep a single neutral color.
+     *
+     * All roles come from the Material color scheme, so the style follows dynamic color.
+     */
     @Composable
     @ReadOnlyComposable
-    fun getColorForState(uiState: TileUiState, iconOnly: Boolean): TileColors {
+    fun circularTileColors(uiState: TileUiState): TileColors =
+        when (uiState.visualState) {
+            STATE_ACTIVE ->
+                TileColors(
+                    background = Color.Transparent,
+                    iconBackground = MaterialTheme.colorScheme.primary,
+                    label = MaterialTheme.colorScheme.onSurface,
+                    secondaryLabel = MaterialTheme.colorScheme.onSurface,
+                    icon = MaterialTheme.colorScheme.onPrimary,
+                )
+
+            STATE_INACTIVE ->
+                TileColors(
+                    background = Color.Transparent,
+                    iconBackground = LocalAndroidColorScheme.current.surfaceEffect2,
+                    label = MaterialTheme.colorScheme.onSurface,
+                    secondaryLabel = MaterialTheme.colorScheme.onSurface,
+                    icon = MaterialTheme.colorScheme.onSurface,
+                )
+
+            else -> circularUnavailableTileColors()
+        }
+
+    /**
+     * Colors for an unavailable tile in the circular style: like [unavailableTileColors], but the
+     * tile itself stays transparent so only the dimmed icon circle is drawn.
+     */
+    @Composable
+    @ReadOnlyComposable
+    fun circularUnavailableTileColors(): TileColors {
+        val surfaceColor = MaterialTheme.colorScheme.surface.copy(alpha = .18f)
+        val onSurfaceVariantColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .38f)
+        return TileColors(
+            background = Color.Transparent,
+            iconBackground = surfaceColor,
+            label = onSurfaceVariantColor,
+            secondaryLabel = onSurfaceVariantColor,
+            icon = onSurfaceVariantColor,
+        )
+    }
+
+    @Composable
+    @ReadOnlyComposable
+    fun getColorForState(
+        uiState: TileUiState,
+        iconOnly: Boolean,
+        circular: Boolean = LocalQSTileStyle.current.isCircular,
+    ): TileColors {
+        if (circular) {
+            return circularTileColors(uiState)
+        }
         return when (uiState.visualState) {
             STATE_ACTIVE -> {
                 if (uiState.handlesToggleClick && !iconOnly) {
@@ -611,7 +851,12 @@ private object TileDefaults {
     }
 
     @Composable
-    fun iconRadius(uiState: TileUiState): Dp {
+    fun iconRadius(
+        uiState: TileUiState,
+        circular: Boolean = LocalQSTileStyle.current.isCircular,
+    ): Dp {
+        // The circular style always renders the icon background as a circle.
+        if (circular) return CircularCornerRadius
         return when (uiState.visualState) {
             STATE_ACTIVE -> ActiveIconCornerRadius
             STATE_INACTIVE -> InactiveIconCornerRadius
@@ -619,6 +864,15 @@ private object TileDefaults {
         }
     }
 
+    /**
+     * Corner radius of the tile *surface*, i.e. of the shape the reveal effect clips a tile with
+     * while the shade expands.
+     *
+     * This is deliberately independent of the style: the circular style draws no tile surface at
+     * all (its background is transparent), and the reveal effect clamps this radius to half of the
+     * revealed height, so a circular constant would behave the same way here. The shape used by
+     * launch/return transitions is [animateTileShapeAsState] instead.
+     */
     @Composable
     fun tileRadius(uiState: TileUiState): Dp {
         return when (uiState.visualState) {
@@ -629,15 +883,33 @@ private object TileDefaults {
     }
 
     @Composable
-    fun animateIconShapeAsState(uiState: TileUiState): State<RoundedCornerShape> {
+    fun animateIconShapeAsState(
+        uiState: TileUiState,
+        circular: Boolean = LocalQSTileStyle.current.isCircular,
+    ): State<RoundedCornerShape> {
         return animateShapeAsState(
-            targetValue = iconRadius(uiState),
+            targetValue = iconRadius(uiState, circular),
             label = "QSTileIconCornerRadius",
         )
     }
 
+    /**
+     * Shape used by the [Expandable] that hosts the launch/return transitions of a tile.
+     *
+     * The circular style uses a circle: its Expandable is hosted by the icon (see
+     * [CircularIconExpandable]), so a circle makes the transition morph into a shape that matches
+     * the circular icon instead of the rounded rectangle of a tile.
+     */
     @Composable
-    fun animateTileShapeAsState(uiState: TileUiState): State<RoundedCornerShape> {
+    fun animateTileShapeAsState(
+        uiState: TileUiState,
+        circular: Boolean = false,
+    ): State<RoundedCornerShape> {
+        if (circular) {
+            // The icon of the circular style never animates its corner radius, so neither does the
+            // shape of its transitions.
+            return remember { mutableStateOf(CircleShape) }
+        }
         return animateShapeAsState(targetValue = tileRadius(uiState), label = "QSTileCornerRadius")
     }
 
