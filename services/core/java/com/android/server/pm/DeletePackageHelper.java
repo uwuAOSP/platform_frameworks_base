@@ -388,7 +388,11 @@ final class DeletePackageHelper {
             final PackageSetting disabledPs = mPm.mSettings.getDisabledSystemPkgLPr(ps);
             if (PackageManagerServiceUtils.isSystemApp(ps)
                     && mPm.checkPermission(CONTROL_KEYGUARD, packageName, UserHandle.USER_SYSTEM)
-                    == PERMISSION_GRANTED) {
+                    == PERMISSION_GRANTED
+                    && !("com.android.systemui".equals(packageName)
+                            && PackageManagerServiceUtils.isUpdatedSystemApp(ps)
+                            && disabledPs != null
+                            && (flags & PackageManager.DELETE_SYSTEM_APP) == 0)) {
                 Slog.w(TAG, "Attempt to delete keyguard system package " + packageName);
                 return false;
             }

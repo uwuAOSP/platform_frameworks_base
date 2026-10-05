@@ -1797,8 +1797,10 @@ final class InstallPackageHelper {
                                         + " doesn't support runtime permissions but the old"
                                         + " target SDK " + oldTargetSdk + " does.");
                     }
-                    // Prevent persistent apps from being updated
+                    // Allow SystemUI updates so it can be iterated on without reflashing the
+                    // system image. The update can be removed with uninstall-system-updates.
                     if (ps.isPersistent()
+                            && !"com.android.systemui".equals(pkgName)
                             && ((installFlags & PackageManager.INSTALL_STAGED) == 0)) {
                         throw new PrepareFailure(PackageManager.INSTALL_FAILED_INVALID_APK,
                                 "Package " + pkgName + " is a persistent app. "
