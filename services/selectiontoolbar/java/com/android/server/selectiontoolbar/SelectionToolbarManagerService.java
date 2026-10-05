@@ -21,9 +21,9 @@ import android.app.AppOpsManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.Binder;
 import android.os.IBinder;
-import android.os.Process;
 import android.os.UserHandle;
 import android.service.selectiontoolbar.ISelectionToolbarRenderService;
 import android.service.selectiontoolbar.ISelectionToolbarRenderServiceCallback;
@@ -46,6 +46,7 @@ public class SelectionToolbarManagerService extends SystemService {
     private static final String LOG_TAG = SelectionToolbarManagerService.class.getSimpleName();
 
     private final RemoteRenderServiceConnector mRemoteRenderServiceConnector;
+    private final int mSelectionToolbarServiceUid;
 
     private InputManagerInternal mInputManagerInternal;
     private ClipboardManagerInternal mClipboardManagerInternal;
@@ -57,6 +58,13 @@ public class SelectionToolbarManagerService extends SystemService {
         String serviceName = context.getResources()
                 .getString(R.string.config_systemUiSelectionToolbarRenderService);
         final ComponentName serviceComponent = ComponentName.unflattenFromString(serviceName);
+        try {
+            mSelectionToolbarServiceUid = context.getPackageManager().getPackageUidAsUser(
+                    serviceComponent.getPackageName(), UserHandle.USER_SYSTEM);
+        } catch (PackageManager.NameNotFoundException e) {
+            throw new IllegalStateException(
+                    "Selection toolbar service package is not installed: " + serviceName, e);
+        }
         mRemoteRenderServiceConnector = new RemoteRenderServiceConnector(context, serviceComponent,
                 UserHandle.USER_SYSTEM, new SelectionToolbarRenderServiceRemoteCallback());
     }
@@ -124,8 +132,9 @@ public class SelectionToolbarManagerService extends SystemService {
         }
 
         private void enforceSystemCaller() {
-            if (Binder.getCallingUid() != Process.SYSTEM_UID) {
-                throw new SecurityException("Only the system toolbar may authorize clipboard actions");
+            if (Binder.getCallingUid() != mSelectionToolbarServiceUid) {
+                throw new SecurityException(
+                        "Only the configured system toolbar may authorize clipboard actions");
             }
         }
     }
