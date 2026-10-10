@@ -1307,6 +1307,36 @@ public class LauncherApps {
     }
 
     /**
+     * Returns whether a package in an accessible, unlocked profile can be force stopped.
+     * Protected packages, active device administrators and restricted profiles are excluded.
+     *
+     * @hide
+     */
+    @RequiresPermission(android.Manifest.permission.FORCE_STOP_PACKAGES)
+    public boolean canForceStopPackage(@NonNull String packageName, @NonNull UserHandle user) {
+        try {
+            return mService.canForceStopPackage(mContext.getPackageName(), packageName, user);
+        } catch (RemoteException re) {
+            throw re.rethrowFromSystemServer();
+        }
+    }
+
+    /**
+     * Force stops a package only in the specified accessible profile, rechecking its eligibility.
+     * Returns false if the package or profile can no longer be stopped.
+     *
+     * @hide
+     */
+    @RequiresPermission(android.Manifest.permission.FORCE_STOP_PACKAGES)
+    public boolean forceStopPackage(@NonNull String packageName, @NonNull UserHandle user) {
+        try {
+            return mService.forceStopPackage(mContext.getPackageName(), packageName, user);
+        } catch (RemoteException re) {
+            throw re.rethrowFromSystemServer();
+        }
+    }
+
+    /**
      * Gets the launcher extras supplied to the system when the given package was suspended via
      * {@code PackageManager#setPackagesSuspended(String[], boolean, PersistableBundle,
      * PersistableBundle, String)}.

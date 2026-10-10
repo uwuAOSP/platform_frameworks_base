@@ -1169,6 +1169,58 @@ public class LauncherAppsService extends SystemService {
         }
 
         @Override
+        public boolean canForceStopPackage(String callingPackage, String packageName,
+                UserHandle user) {
+            return forceStopPackageInternal(callingPackage, packageName, user, false);
+        }
+
+        @Override
+        public boolean forceStopPackage(String callingPackage, String packageName, UserHandle user) {
+            return forceStopPackageInternal(callingPackage, packageName, user, true);
+        }
+
+        private boolean forceStopPackageInternal(String callingPackage, String packageName,
+                UserHandle user, boolean stop) {
+            Objects.requireNonNull(packageName);
+            Objects.requireNonNull(user);
+            final int callingUid = injectBinderCallingUid();
+            verifyCallingPackage(callingPackage, callingUid);
+            mContext.enforceCallingPermission(Manifest.permission.FORCE_STOP_PACKAGES,
+                    "Cannot force stop package");
+            final int userId = user.getIdentifier();
+            if (userId < 0 || !canAccessProfile(userId, "Cannot force stop package")
+                    || callingPackage.equals(packageName)) {
+                return false;
+            }
+
+            // Preserve caller visibility while evaluating policy under the system identity.
+            final long ident = Binder.clearCallingIdentity();
+            try {
+                final ApplicationInfo info = mPackageManagerInternal.getApplicationInfo(
+                        packageName, 0, callingUid, userId);
+                if (info == null || !info.enabled
+                        || (info.flags & ApplicationInfo.FLAG_INSTALLED) == 0
+                        || (info.flags & ApplicationInfo.FLAG_STOPPED) != 0
+                        || UserHandle.getAppId(info.uid) < Process.FIRST_APPLICATION_UID
+                        || UserHandle.isSameApp(info.uid, callingUid)
+                        || !mUserManagerInternal.isUserUnlocked(userId)
+                        || mUm.isQuietModeEnabled(user)
+                        || mUm.hasUserRestrictionForUser(UserManager.DISALLOW_APPS_CONTROL, user)
+                        || mPackageManagerInternal.isPackageStateProtected(packageName, userId)
+                        || (mDpm != null && mDpm.packageHasActiveAdmins(packageName, userId))) {
+                    return false;
+                }
+                if (stop) {
+                    mContext.getSystemService(ActivityManager.class)
+                            .forceStopPackageAsUser(packageName, userId);
+                }
+                return true;
+            } finally {
+                Binder.restoreCallingIdentity(ident);
+            }
+        }
+
+        @Override
         public Bundle getSuspendedPackageLauncherExtras(String packageName,
                 UserHandle user) {
             final int callingUid = injectBinderCallingUid();
