@@ -139,4 +139,7 @@ interface ILauncherApps {
     ParceledListSlice getAvailableShortcuts(String callingPackage, in UserHandle user);
 
     ParceledListSlice getActivityLaunchIntentForAllApps(String callingPackage, in UserHandle user);
+
+    boolean canForceStopPackage(String callingPackage, String packageName, in UserHandle user);
+    boolean forceStopPackage(String callingPackage, String packageName, in UserHandle user);
 }
