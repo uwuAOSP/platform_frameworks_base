@@ -267,6 +267,17 @@ public class NotificationMediaManager implements Dumpable {
             .orElse(null);
     }
 
+    @Nullable
+    public Icon getMediaNotificationSmallIcon(String packageName) {
+        if (mMediaNotificationKey == null) {
+            return null;
+        }
+        return Optional.ofNullable(mNotifPipeline.getEntry(mMediaNotificationKey))
+            .filter(entry -> packageName.equals(entry.getSbn().getPackageName()))
+            .map(entry -> entry.getSbn().getNotification().getSmallIcon())
+            .orElse(null);
+    }
+
     public void addCallback(MediaListener callback) {
         mMediaListeners.add(callback);
         mBackgroundExecutor.execute(() -> updateMediaMetaData(callback));

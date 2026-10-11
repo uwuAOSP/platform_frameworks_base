@@ -18,7 +18,6 @@ package org.uwuaosp.systemui.lyric;
 
 import android.content.ComponentName;
 import android.content.Context;
-import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.database.ContentObserver;
 import android.graphics.Rect;
@@ -52,7 +51,9 @@ import com.android.systemui.settings.UserTracker;
 import com.android.systemui.statusbar.NotificationListener;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -77,6 +78,7 @@ public abstract class LyricViewController implements DarkIconDispatcher.DarkRece
     private final ComponentName mNotificationListenerComponent;
     private final ContrastColorUtil mNotificationColorUtil;
     private final UserTracker mUserTracker;
+    private final Map<String, Icon> mMediaNotificationIconCache = new HashMap<>();
     private static volatile LyricViewController sDebugController;
 
     private MediaController mCurrentMediaController;
@@ -575,18 +577,19 @@ public abstract class LyricViewController implements DarkIconDispatcher.DarkRece
     }
 
     private Drawable resolveSessionIcon(MediaController controller) {
-        Icon mediaIcon = Dependency.get(NotificationMediaManager.class).getMediaIcon();
-        if (mediaIcon != null) {
-            Drawable drawable = mediaIcon.loadDrawable(mContext);
-            if (drawable != null) {
-                return drawable;
+        String packageName = controller.getPackageName();
+        Icon mediaIcon = mMediaNotificationIconCache.get(packageName);
+        if (mediaIcon == null) {
+            mediaIcon = Dependency.get(NotificationMediaManager.class)
+                    .getMediaNotificationSmallIcon(packageName);
+            if (mediaIcon != null) {
+                mMediaNotificationIconCache.put(packageName, mediaIcon);
             }
         }
-        try {
-            return mContext.getPackageManager().getApplicationIcon(controller.getPackageName());
-        } catch (PackageManager.NameNotFoundException e) {
-            return null;
+        if (mediaIcon != null) {
+            return mediaIcon.loadDrawable(mContext);
         }
+        return null;
     }
 
     private void detachCurrentController() {
@@ -765,12 +768,11 @@ public abstract class LyricViewController implements DarkIconDispatcher.DarkRece
     }
 
     private void setIconForAllHolders(Drawable icon) {
-        if (icon == null) {
-            return;
-        }
-        mOverlayLyricViewHolder.mIconSwitcher.setImageDrawable(copyDrawable(icon));
+        mOverlayLyricViewHolder.mIconSwitcher.setImageDrawable(
+                icon == null ? null : copyDrawable(icon));
         if (mInlineLyricViewHolder != null) {
-            mInlineLyricViewHolder.mIconSwitcher.setImageDrawable(copyDrawable(icon));
+            mInlineLyricViewHolder.mIconSwitcher.setImageDrawable(
+                    icon == null ? null : copyDrawable(icon));
         }
         updateIconTint();
         updateIconVisibility();
