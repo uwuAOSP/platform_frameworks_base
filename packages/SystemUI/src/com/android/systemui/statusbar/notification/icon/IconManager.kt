@@ -34,6 +34,7 @@ import com.android.systemui.dagger.SysUISingleton
 import com.android.systemui.dagger.qualifiers.Application
 import com.android.systemui.dagger.qualifiers.Background
 import com.android.systemui.dagger.qualifiers.Main
+import com.android.systemui.notifications.content.icon.AppIconProvider
 import com.android.systemui.res.R
 import com.android.systemui.shade.ShadeDisplayAware
 import com.android.systemui.statusbar.StatusBarIconView
@@ -71,6 +72,7 @@ constructor(
     @Background private val bgCoroutineContext: CoroutineContext,
     @Main private val mainCoroutineContext: CoroutineContext,
     @ShadeDisplayAware private val shadeContext: Context,
+    private val appIconProvider: AppIconProvider,
 ) : ConversationIconManager {
 
     /**
@@ -90,6 +92,11 @@ constructor(
      */
     private var launcherPeopleAvatarIconJobs: ConcurrentHashMap<String, Job> =
         ConcurrentHashMap<String, Job>()
+
+    private val launcherMonochromeIcons = ConcurrentHashMap<String, CachedMonochromeIcon>()
+    private val completedMonochromeIconChecks = ConcurrentHashMap<String, Icon>()
+    private val pendingMonochromeIconChecks = ConcurrentHashMap<String, Icon>()
+    private val pendingMonochromeIconJobs = ConcurrentHashMap<String, Job>()
 
     fun addIconsUpdateListener(listener: OnIconUpdateRequiredListener) {
         onIconUpdateRequiredListeners += listener
@@ -111,6 +118,10 @@ constructor(
 
             override fun onEntryCleanUp(entry: NotificationEntry) {
                 entry.removeOnSensitivityChangedListener(sensitivityListener)
+                launcherMonochromeIcons.remove(entry.key)
+                completedMonochromeIconChecks.remove(entry.key)
+                pendingMonochromeIconChecks.remove(entry.key)
+                pendingMonochromeIconJobs.remove(entry.key)?.cancel()
             }
 
             override fun onRankingApplied() {
@@ -361,12 +372,17 @@ constructor(
         }
 
         val n = entry.sbn.notification
-        val (icon: Icon?, type: StatusBarIcon.Type) =
+        val (sourceIcon: Icon?, type: StatusBarIcon.Type) =
             if (showPeopleAvatar) {
                 createPeopleAvatar(entry) to StatusBarIcon.Type.PeopleAvatar
             } else {
                 n.smallIcon to StatusBarIcon.Type.NotifSmallIcon
             }
+        val icon = if (type == StatusBarIcon.Type.NotifSmallIcon) {
+            getCachedLauncherMonochromeIcon(entry, sourceIcon)
+        } else {
+            sourceIcon
+        }
         if (icon == null) {
             throw InflationException("No icon in notification from ${entry.sbn.packageName}")
         }
@@ -375,6 +391,68 @@ constructor(
         cacheIconDescriptor(entry, sbi)
         return sbi
     }
+
+    private fun getCachedLauncherMonochromeIcon(
+        entry: NotificationEntry,
+        sourceIcon: Icon?,
+    ): Icon? {
+        if (sourceIcon == null) return null
+        val cached = launcherMonochromeIcons[entry.key]
+        if (cached?.sourceIcon == sourceIcon) return cached.replacementIcon
+        scheduleLauncherMonochromeIconCheck(entry, sourceIcon)
+        return sourceIcon
+    }
+
+    private fun scheduleLauncherMonochromeIconCheck(entry: NotificationEntry, sourceIcon: Icon) {
+        val key = entry.key
+        if (completedMonochromeIconChecks[key] == sourceIcon) return
+        if (pendingMonochromeIconChecks.putIfAbsent(key, sourceIcon) != null) return
+
+        val job = applicationCoroutineScope.launch {
+            val replacement =
+                withContext(bgCoroutineContext) {
+                    runCatching {
+                        if (!NotificationSmallIconUtils.needsLauncherMonochrome(
+                                sourceIcon,
+                                shadeContext,
+                            )
+                        ) {
+                            return@runCatching null
+                        }
+                        val launcherIcon =
+                            appIconProvider.getOrFetchAppIcon(
+                                packageName = entry.sbn.packageName,
+                                userHandle = entry.sbn.user,
+                                instanceKey = "NOTIFICATION_MONOCHROME",
+                            )
+                        NotificationSmallIconUtils.toMonochromeIcon(launcherIcon)
+                            ?: return@runCatching null
+                    }.getOrNull()
+                }
+
+            withContext(mainCoroutineContext) {
+                pendingMonochromeIconChecks.remove(key, sourceIcon)
+                pendingMonochromeIconJobs.remove(key)
+                val currentIcon = entry.sbn.notification.smallIcon
+                if (currentIcon != sourceIcon) {
+                    currentIcon?.let { scheduleLauncherMonochromeIconCheck(entry, it) }
+                    return@withContext
+                }
+                completedMonochromeIconChecks[key] = sourceIcon
+                if (replacement != null) {
+                    launcherMonochromeIcons[key] = CachedMonochromeIcon(sourceIcon, replacement)
+                    entry.icons.smallIconDescriptor = null
+                    updateIconsSafe(entry)
+                }
+            }
+        }
+        pendingMonochromeIconJobs[key] = job
+    }
+
+    private data class CachedMonochromeIcon(
+        val sourceIcon: Icon,
+        val replacementIcon: Icon,
+    )
 
     private fun getCachedIconDescriptor(
         entry: NotificationEntry,

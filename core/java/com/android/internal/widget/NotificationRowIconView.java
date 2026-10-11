@@ -153,7 +153,8 @@ public class NotificationRowIconView extends CachingIconView {
             setImageDrawable(mAppIcon);
             adjustViewForIconStyle();
         } else {
-            super.setImageIcon(icon);
+            Icon smallIcon = mIconProvider != null ? mIconProvider.getSmallIconOverride() : null;
+            super.setImageIcon(smallIcon != null ? smallIcon : icon);
             adjustViewForIconStyle();
         }
     }
@@ -175,8 +176,10 @@ public class NotificationRowIconView extends CachingIconView {
                 adjustViewForIconStyle();
             };
         } else {
+            Icon smallIcon = mIconProvider != null ? mIconProvider.getSmallIconOverride() : null;
+            Icon iconToLoad = smallIcon != null ? smallIcon : icon;
             return () -> {
-                super.setImageIcon(icon);
+                super.setImageIcon(iconToLoad);
                 adjustViewForIconStyle();
             };
         }
@@ -292,6 +295,15 @@ public class NotificationRowIconView extends CachingIconView {
 
         /** Whether this notification should use the app icon, the small icon, or a bridged icon. */
         @IconType int getIconType();
+
+        /**
+         * Optionally supplies a replacement for the notification's small icon. The replacement
+         * keeps the small-icon view styling and tint behavior; returning null uses the original.
+         */
+        @Nullable
+        default Icon getSmallIconOverride() {
+            return null;
+        }
 
         /**
          * If this is a bridged notification, this is the icon of the app that the notification

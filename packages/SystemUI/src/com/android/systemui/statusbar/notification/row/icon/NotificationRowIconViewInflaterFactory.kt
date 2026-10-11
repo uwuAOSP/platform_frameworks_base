@@ -27,6 +27,7 @@ import com.android.internal.widget.NotificationRowIconView.ICON_TYPE_SMALL_ICON
 import com.android.internal.widget.NotificationRowIconView.IconType
 import com.android.internal.widget.NotificationRowIconView.NotificationIconProvider
 import com.android.systemui.notifications.content.icon.AppIconProvider
+import com.android.systemui.statusbar.notification.icon.NotificationSmallIconUtils
 import com.android.systemui.statusbar.notification.row.ExpandableNotificationRow
 import com.android.systemui.statusbar.notification.row.NotifRemoteViewsFactory
 import com.android.systemui.statusbar.notification.row.NotificationRowContentBinder
@@ -85,12 +86,14 @@ constructor(
         return object : NotificationIconProvider {
             @IconType
             override fun getIconType(): Int {
-                var iconType =
-                    if (iconStyleProvider.shouldShowAppIcon(sbn, context)) {
-                        ICON_TYPE_LAUNCHER_ICON
-                    } else {
-                        ICON_TYPE_SMALL_ICON
-                    }
+                var iconType = when {
+                    NotificationSmallIconUtils.needsLauncherMonochrome(
+                        sbn.notification.smallIcon,
+                        context,
+                    ) -> ICON_TYPE_SMALL_ICON
+                    iconStyleProvider.shouldShowAppIcon(sbn, context) -> ICON_TYPE_LAUNCHER_ICON
+                    else -> ICON_TYPE_SMALL_ICON
+                }
                 if (
                     android.app.Flags.bridgedNotifications() &&
                         (sbn.getNotification().getBridgedNotificationMetadata() != null)
@@ -103,6 +106,23 @@ constructor(
                 return iconType
             }
 
+            override fun getSmallIconOverride(): android.graphics.drawable.Icon? {
+                if (!NotificationSmallIconUtils.needsLauncherMonochrome(
+                        sbn.notification.smallIcon,
+                        context,
+                    )
+                ) {
+                    return null
+                }
+                val launcherIcon =
+                    appIconProvider.getOrFetchAppIcon(
+                        packageName = sbn.packageName,
+                        userHandle = sbn.user,
+                        instanceKey = "NOTIFICATION_MONOCHROME",
+                    )
+                return NotificationSmallIconUtils.toMonochromeIcon(launcherIcon)
+            }
+
             override fun getBridgedIcon(): Drawable? {
                 val bridgedMetadata = sbn.notification.bridgedNotificationMetadata ?: return null
                 return bridgedIconProvider.getBridgedIcon(context, bridgedMetadata)
@@ -111,7 +131,7 @@ constructor(
             override fun getLauncherIcon(): Drawable {
                 return appIconProvider.getOrFetchAppIcon(
                     packageName = sbn.packageName,
-                    userHandle = context.user,
+                    userHandle = sbn.user,
                     instanceKey = "LEGACY",
                 )
             }
