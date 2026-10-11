@@ -82,12 +82,12 @@ final class AppBackgroundModeConfig {
                 final Iterator<String> keys = object.keys();
                 while (keys.hasNext()) {
                     final String packageName = keys.next();
-                    int mode = object.optInt(packageName, MODE_DEFAULT);
+                    int mode = object.optInt(packageName, -1);
                     if (mode == MODE_AUTO) {
                         mode = MODE_TOMBSTONE;
                         malformed = true;
                     }
-                    if ((mode == MODE_TOMBSTONE || mode == MODE_FULL || mode == MODE_AUTO)
+                    if ((mode == MODE_DEFAULT || mode == MODE_TOMBSTONE || mode == MODE_FULL)
                             && packageAllowed.test(packageName)) {
                         sorted.put(packageName, mode);
                     } else {

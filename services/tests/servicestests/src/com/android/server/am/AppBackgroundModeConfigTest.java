@@ -63,8 +63,9 @@ public class AppBackgroundModeConfigTest {
                 packageName -> !packageName.equals("blocked"));
 
         assertThat(result.modes).containsExactly(
-                "allowed", AppBackgroundModeConfig.MODE_TOMBSTONE);
-        assertThat(result.normalized).isEqualTo("{\"allowed\":1}");
+                "allowed", AppBackgroundModeConfig.MODE_TOMBSTONE,
+                "default", AppBackgroundModeConfig.MODE_DEFAULT);
+        assertThat(result.normalized).isEqualTo("{\"allowed\":1,\"default\":0}");
         assertThat(result.changed).isTrue();
     }
 

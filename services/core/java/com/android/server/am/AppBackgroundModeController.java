@@ -80,6 +80,8 @@ final class AppBackgroundModeController {
     private PackageManager mPackageManager;
     private final Object mLock = new Object();
     private final SparseArray<ArrayMap<String, Integer>> mModesByUser = new SparseArray<>();
+    private final SparseIntArray mDefaultModesByUser = new SparseIntArray();
+    private final SparseArray<ArraySet<String>> mCriticalPackagesByUser = new SparseArray<>();
     private final SparseBooleanArray mIgnoreTaskRemovalByUser = new SparseBooleanArray();
     private final SparseIntArray mEffectiveUidModes = new SparseIntArray();
     // Process-scoped leases; never written into the user's saved background modes.
@@ -143,11 +145,18 @@ final class AppBackgroundModeController {
         final ContentObserver settingsObserver = new ContentObserver(mHandler) {
             @Override
             public void onChange(boolean selfChange, Uri uri, int userId) {
-                reloadUser(userId);
+                if (userId == UserHandle.USER_ALL) {
+                    reloadAllUsers();
+                } else {
+                    reloadUser(userId);
+                }
             }
         };
         resolver.registerContentObserver(
                 Settings.Secure.getUriFor(Settings.Secure.UWU_APP_BACKGROUND_MODES),
+                false, settingsObserver, UserHandle.USER_ALL);
+        resolver.registerContentObserver(
+                Settings.Secure.getUriFor(Settings.Secure.UWU_APP_BACKGROUND_DEFAULT_MODE),
                 false, settingsObserver, UserHandle.USER_ALL);
         resolver.registerContentObserver(
                 Settings.Secure.getUriFor(
@@ -434,6 +443,8 @@ final class AppBackgroundModeController {
             if (Intent.ACTION_USER_REMOVED.equals(action) && userId != UserHandle.USER_NULL) {
                 synchronized (mLock) {
                     mModesByUser.remove(userId);
+                    mDefaultModesByUser.delete(userId);
+                    mCriticalPackagesByUser.remove(userId);
                     mIgnoreTaskRemovalByUser.delete(userId);
                 }
                 rebuildEffectiveModes();
@@ -475,8 +486,16 @@ final class AppBackgroundModeController {
                 Settings.Secure.UWU_APP_BACKGROUND_IGNORE_TASK_REMOVAL, 0, userId) != 0;
         final AppBackgroundModeConfig.ParseResult parsed = AppBackgroundModeConfig.parse(value,
                 packageName -> isConfigurablePackage(packageName, userId, criticalPackages));
+        final int requestedDefaultMode = Settings.Secure.getIntForUser(
+                mContext.getContentResolver(), Settings.Secure.UWU_APP_BACKGROUND_DEFAULT_MODE,
+                AppBackgroundModeConfig.MODE_DEFAULT, userId);
+        final int defaultMode = requestedDefaultMode == AppBackgroundModeConfig.MODE_TOMBSTONE
+                || requestedDefaultMode == AppBackgroundModeConfig.MODE_FULL
+                ? requestedDefaultMode : AppBackgroundModeConfig.MODE_DEFAULT;
         synchronized (mLock) {
             mModesByUser.put(userId, parsed.modes);
+            mDefaultModesByUser.put(userId, defaultMode);
+            mCriticalPackagesByUser.put(userId, criticalPackages);
             mIgnoreTaskRemovalByUser.put(userId, ignoreTaskRemoval);
         }
         if (parsed.changed) {
@@ -498,6 +517,7 @@ final class AppBackgroundModeController {
         final SparseIntArray previous;
         final SparseIntArray next = new SparseIntArray();
         final ArraySet<Integer> candidateUids = new ArraySet<>();
+        final ArraySet<Integer> defaultModeUsers = new ArraySet<>();
         synchronized (mLock) {
             previous = mEffectiveUidModes.clone();
             for (int i = 0; i < mOcrDownloadProcesses.size(); i++) {
@@ -505,6 +525,10 @@ final class AppBackgroundModeController {
             }
             for (int userIndex = 0; userIndex < mModesByUser.size(); userIndex++) {
                 final int userId = mModesByUser.keyAt(userIndex);
+                if (mDefaultModesByUser.get(userId, AppBackgroundModeConfig.MODE_DEFAULT)
+                        != AppBackgroundModeConfig.MODE_DEFAULT) {
+                    defaultModeUsers.add(userId);
+                }
                 final ArrayMap<String, Integer> modes = mModesByUser.valueAt(userIndex);
                 for (int packageIndex = 0; packageIndex < modes.size(); packageIndex++) {
                     final ApplicationInfo info = getApplicationInfo(modes.keyAt(packageIndex),
@@ -513,6 +537,18 @@ final class AppBackgroundModeController {
                         candidateUids.add(info.uid);
                     }
                 }
+            }
+        }
+
+        // Enumerate installed apps so Full defaults also reach the DeviceIdle allowlist.
+        // Rebuild a complete snapshot before comparing, rather than reading a new default
+        // while resolving the previous snapshot.
+        for (int i = 0; i < defaultModeUsers.size(); i++) {
+            final int userId = defaultModeUsers.valueAt(i);
+            for (ApplicationInfo info : mPackageManager.getInstalledApplicationsAsUser(
+                    PackageManager.ApplicationInfoFlags.of(
+                            PackageManager.MATCH_DISABLED_COMPONENTS), userId)) {
+                candidateUids.add(info.uid);
             }
         }
 
@@ -553,15 +589,24 @@ final class AppBackgroundModeController {
         }
         final int userId = UserHandle.getUserId(uid);
         final ArrayMap<String, Integer> userModes;
+        final ArraySet<String> criticalPackages;
+        final int defaultMode;
         synchronized (mLock) {
             userModes = mModesByUser.get(userId);
+            criticalPackages = mCriticalPackagesByUser.get(userId);
+            defaultMode = mDefaultModesByUser.get(userId, AppBackgroundModeConfig.MODE_DEFAULT);
             if (userModes == null) {
                 return AppBackgroundModeConfig.MODE_DEFAULT;
             }
         }
         final int[] modes = new int[packages.length];
         for (int i = 0; i < packages.length; i++) {
-            modes[i] = userModes.getOrDefault(packages[i], AppBackgroundModeConfig.MODE_DEFAULT);
+            // A protected package protects its entire shared UID, regardless of the default.
+            if (criticalPackages == null
+                    || !isConfigurablePackage(packages[i], userId, criticalPackages)) {
+                return AppBackgroundModeConfig.MODE_DEFAULT;
+            }
+            modes[i] = userModes.getOrDefault(packages[i], defaultMode);
         }
         return AppBackgroundModeConfig.resolveUidMode(modes);
     }
