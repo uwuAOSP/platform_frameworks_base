@@ -101,6 +101,7 @@ import com.android.systemui.res.R;
 import com.android.systemui.scene.shared.flag.SceneContainerFlag;
 import com.android.systemui.shade.QSHeaderBoundsProvider;
 import com.android.systemui.shade.TouchLogger;
+import com.android.systemui.shade.ui.ShadeSwipeMotion;
 import com.android.systemui.statusbar.NotificationShelf;
 import com.android.systemui.statusbar.StatusBarState;
 import com.android.systemui.statusbar.notification.ColorUpdateLogger;
@@ -243,6 +244,8 @@ public class NotificationStackScrollLayout
     // mImeInset=0 when IME is hidden
     int mImeInset = 0;
     private float mQsExpansionFraction;
+    private float mShadeSwipeProgress = 1f;
+    private float mShadeSwipeDirection;
     private final int mSplitShadeMinContentHeight;
     private Supplier<String> mLastUpdateSidePaddingDumpStringSupplier = () -> "(Not yet measured)";
 
@@ -1294,6 +1297,14 @@ public class NotificationStackScrollLayout
     public void setPlaceholderAlpha(float alpha) {
         if (SceneContainerFlag.isUnexpectedlyInLegacyMode()) return;
         mAmbientState.setPlaceholderAlpha(alpha);
+    }
+
+    @Override
+    public void setShadeSwipeProgress(float visibleProgress, float direction) {
+        if (mShadeSwipeProgress == visibleProgress && mShadeSwipeDirection == direction) return;
+        mShadeSwipeProgress = visibleProgress;
+        mShadeSwipeDirection = direction;
+        invalidate();
     }
 
     @Override
@@ -3985,6 +3996,11 @@ public class NotificationStackScrollLayout
         }
         if (!isRootViewVisible()) {
             debugShadeLog("NSSL's root view is not visible. Refusing touch event");
+            return true;
+        }
+        if (mShadeSwipeProgress < 1f
+                && getChildAtPosition(ev.getX(), ev.getY())
+                        instanceof ExpandableNotificationRow row && !row.isHeadsUpState()) {
             return true;
         }
         return !mScrollViewFields.interactive || isOutBoundsDownEvent(ev);
@@ -6910,6 +6926,33 @@ public class NotificationStackScrollLayout
 
     @Override
     protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
+        if (mShadeSwipeProgress < 1f && !mLaunchingNotification
+                && child instanceof ExpandableNotificationRow row && !row.isHeadsUpState()) {
+            // Do not change row translation: swipe-to-dismiss owns that property.
+            int order = 0;
+            for (int i = 0; i < getChildCount(); i++) {
+                View other = getChildAt(i);
+                if (other instanceof ExpandableNotificationRow otherRow
+                        && other.getVisibility() == VISIBLE
+                        && other.getTranslationY() + otherRow.getActualHeight()
+                                > mRoundedRectClippingTop
+                        && other.getTranslationY() < row.getTranslationY()) {
+                    order++;
+                }
+            }
+            float density = getResources().getDisplayMetrics().density;
+            float offset = mShadeSwipeDirection * density * (64f * (1f - mShadeSwipeProgress)
+                    + 48f * ShadeSwipeMotion.offsetFraction(mShadeSwipeProgress, order));
+            int saveCount = canvas.save();
+            canvas.translate(offset, 0f);
+            boolean result = drawShadeSwipeChild(canvas, child, drawingTime);
+            canvas.restoreToCount(saveCount);
+            return result;
+        }
+        return drawShadeSwipeChild(canvas, child, drawingTime);
+    }
+
+    private boolean drawShadeSwipeChild(Canvas canvas, View child, long drawingTime) {
         boolean shouldUseClipping =
                 mShouldUseRoundedRectClipping || mShouldUseNegativeRoundedRectClipping;
         if (mBlurEffect != null) {

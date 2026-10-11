@@ -61,7 +61,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onLayoutRectChanged
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
@@ -70,7 +69,6 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.android.compose.PlatformSliderDefaults
@@ -116,7 +114,8 @@ import com.android.systemui.shade.ui.composable.OverlayShade
 import com.android.systemui.shade.ui.composable.OverlayShadeHeader
 import com.android.systemui.shade.ui.composable.QuickSettingsOverlayHeader
 import com.android.systemui.shade.ui.composable.QuickSettingsOverlayPrivacyChip
-import com.android.systemui.shade.ui.composable.switchShadeOnHorizontalSwipe
+import com.android.systemui.shade.ui.composable.shadeHeaderSwipeRegion
+import com.android.systemui.shade.ui.composable.shadeSwipeItem
 import com.android.systemui.statusbar.notification.stack.shared.model.ShadeScrimBounds
 import com.android.systemui.statusbar.notification.stack.shared.model.ShadeScrimShape
 import com.android.systemui.statusbar.notification.stack.ui.view.NotificationScrollView
@@ -176,6 +175,15 @@ constructor(
 
         val showBrightnessMirror =
             quickSettingsContainerViewModel.brightnessSliderViewModel.showMirror
+        val isEditing by
+            quickSettingsContainerViewModel.editModeViewModel.isEditing
+                .collectAsStateWithLifecycle()
+        val canSwipeHeader =
+            contentViewModel.shadeModeInteractor.isDualShade &&
+                !isEditing &&
+                (!QsDetailedView.isEnabled ||
+                    quickSettingsContainerViewModel.detailsViewModel.activeTileDetails == null) &&
+                !showBrightnessMirror
         val contentAlphaFromBrightnessMirror by
             animateFloatAsState(if (showBrightnessMirror) 0f else 1f)
 
@@ -229,7 +237,9 @@ constructor(
                             notificationsHighlight = headerViewModel.inactiveChipHighlight,
                             quickSettingsHighlight = ChipHighlightModel.Strong,
                             showClock = true,
-                            modifier = Modifier.element(QuickSettingsShade.Elements.StatusBar),
+                            modifier =
+                                Modifier.element(QuickSettingsShade.Elements.StatusBar)
+                                    .shadeHeaderSwipeRegion(canSwipeHeader),
                         )
                     }
                 },
@@ -359,7 +369,6 @@ private fun ContentScope.QuickSettingsLayout(
     isDualShade: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     // The scene-based overlay is the active QS container on this device. Read the raw style flow
     // here because the composition local is not guaranteed to reach this isolated overlay scope.
     val tileStyle by qsContainerViewModel.brightnessSliderViewModel.tileStyleFlow.collectAsState()
@@ -367,15 +376,7 @@ private fun ContentScope.QuickSettingsLayout(
     val brightnessSettings = rememberQsBrightnessSettings()
     val brightnessAtTop = brightnessSettings.sliderAtTop
     val showBrightnessSlider = brightnessSettings.showSlider != 0
-    val switchToNotificationsModifier =
-        if (isDualShade) {
-            Modifier.switchShadeOnHorizontalSwipe(
-                swipeLeft = isRtl,
-                onSwipe = qsContainerViewModel.shadeHeaderViewModel::onNotificationIconChipClicked,
-            )
-        } else {
-            Modifier
-        }
+    val canSwipeHeader = isDualShade && !qsContainerViewModel.brightnessSliderViewModel.showMirror
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -400,7 +401,7 @@ private fun ContentScope.QuickSettingsLayout(
                 Modifier.fillMaxWidth()
                     .requiredHeight(QuickSettingsShade.Dimensions.ToolbarHeight)
                     .sysuiResTag("quick_settings_toolbar")
-                    .then(switchToNotificationsModifier),
+                    .shadeHeaderSwipeRegion(canSwipeHeader),
             viewModel = toolbarViewModel,
             isFullyVisible = { layoutState.isIdle(contentKey) },
         )
@@ -412,7 +413,7 @@ private fun ContentScope.QuickSettingsLayout(
                 viewModel = qsContainerViewModel.shadeHeaderViewModel,
                 modifier =
                     Modifier.element(QuickSettingsShade.Elements.Header)
-                        .then(switchToNotificationsModifier),
+                        .shadeHeaderSwipeRegion(canSwipeHeader),
             )
             VerticalSeparator(QuickSettingsShade.Dimensions.ShortPadding)
         }
@@ -423,7 +424,7 @@ private fun ContentScope.QuickSettingsLayout(
                 presentationStyle = MediaPresentationStyle.Compact,
                 behavior = QuickSettingsContainerViewModel.mediaUiBehavior,
                 onDismissed = qsContainerViewModel::onMediaSwipeToDismiss,
-                modifier = Modifier,
+                modifier = shadeSwipeItem(0),
                 location = Media.Location.QS,
             )
 
@@ -438,11 +439,13 @@ private fun ContentScope.QuickSettingsLayout(
                             key =
                                 if (circular) QuickSettings.Elements.CircularBrightnessSlider
                                 else QuickSettings.Elements.BrightnessSlider,
-                            modifier = Modifier,
+                            modifier = shadeSwipeItem(0),
                         ) {
                             Box(
                                 Modifier.systemGestureExclusionInShade(
-                                    enabled = { layoutState.transitionState is TransitionState.Idle }
+                                    enabled = {
+                                        layoutState.transitionState is TransitionState.Idle
+                                    }
                                 )
                             ) {
                                 BrightnessSliderContainer(
@@ -451,10 +454,13 @@ private fun ContentScope.QuickSettingsLayout(
                                         ContainerColors(
                                             idleColor = Color.Transparent,
                                             mirrorColor =
-                                                OverlayShade.Colors.panelBackground(isTransparencyEnabled),
+                                                OverlayShade.Colors.panelBackground(
+                                                    isTransparencyEnabled
+                                                ),
                                         ),
                                     modifier = Modifier.fillMaxWidth(),
-                                    dimensions = QuickSettingsShade.Dimensions.brightnessSliderDimensions,
+                                    dimensions =
+                                        QuickSettingsShade.Dimensions.brightnessSliderDimensions,
                                 )
                             }
                         }
@@ -473,7 +479,7 @@ private fun ContentScope.QuickSettingsLayout(
                     )
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().then(shadeSwipeItem(1)),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         VolumeSlider(

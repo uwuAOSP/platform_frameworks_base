@@ -53,6 +53,7 @@ import com.android.systemui.qs.pipeline.shared.TileSpec
 import com.android.systemui.qs.shared.ui.QuickSettings.Elements.toElementKey
 import com.android.systemui.res.R
 import com.android.systemui.shade.shared.flag.DualShadeFlag
+import com.android.systemui.shade.ui.composable.shadeSwipeItem
 import javax.inject.Inject
 import kotlinx.coroutines.launch
 
@@ -125,7 +126,7 @@ constructor(
         ) { spanIndex, column, isFirstInColumn, isLastInColumn ->
             val it = sizedTiles[spanIndex]
 
-            Element(it.tile.spec.toElementKey(), Modifier) {
+            Element(it.tile.spec.toElementKey(), shadeSwipeItem(spanIndex + 1)) {
                 Tile(
                     tile = it.tile,
                     // The circular style shows a label under every tile, so no tile is icon only.

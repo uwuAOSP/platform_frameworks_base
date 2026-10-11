@@ -33,6 +33,9 @@ object TransitionKeys {
     /** A scene transition that can collapse the Shade slightly faster than a normal collapse. */
     val SlightlyFasterShadeTransition = TransitionKey("SlightlyFasterShadeTransition")
 
+    /** A horizontal, gesture-driven replacement of the two dual-shade panels. */
+    val HorizontalShadeSwipe = TransitionKey("HorizontalShadeSwipe")
+
     /** A scene transition that should happen instantly, i.e. without animation. */
     val Instant = TransitionKey("Instant")
 

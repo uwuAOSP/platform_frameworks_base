@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateMapOf
@@ -37,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
@@ -65,7 +67,10 @@ import com.android.systemui.scene.shared.model.SceneDataSourceDelegator
 import com.android.systemui.scene.ui.view.SceneJankMonitor
 import com.android.systemui.scene.ui.view.SceneTransitionLatencyMonitor
 import com.android.systemui.scene.ui.viewmodel.SceneContainerViewModel
+import com.android.systemui.shade.ui.composable.LocalShadeHeaderSwipeRegions
 import com.android.systemui.shade.ui.composable.OverlayShade
+import com.android.systemui.shade.ui.composable.ShadeHeaderSwipeRegions
+import com.android.systemui.shade.ui.composable.ShadeHeaderSwipeSourceDetector
 import kotlinx.coroutines.CoroutineScope
 import platform.test.motion.compose.values.isRunningMotionTest
 
@@ -302,61 +307,67 @@ private fun InternalSceneContainer(
             modifier = Modifier.fillMaxSize(),
         )
 
-        SceneTransitionLayout(
-            state = state,
-            modifier = Modifier.fillMaxSize(),
-            swipeSourceDetector = viewModel.swipeSourceDetector,
-            swipeDetector =
-                remember { PassthroughSwipeDetector(velocityThreshold = swipeVelocityThreshold) },
-            implicitTestTags = isRunningMotionTest,
-            debugName = "SceneContainer",
-        ) {
-            sceneByKey.forEach { (sceneKey, scene) ->
-                scene(
-                    key = sceneKey,
-                    userActions = userActionsByContentKey.getOrDefault(sceneKey, emptyMap()),
-                    effectFactory = offsetOverscrollEffectFactory,
-                    alwaysCompose = scene.alwaysCompose,
-                ) {
-                    // Activate the scene.
-                    LaunchedEffect(scene) { scene.activate() }
+        val headerSwipeRegions = remember { ShadeHeaderSwipeRegions() }
+        val swipeSourceDetector = viewModel.swipeSourceDetector
+        CompositionLocalProvider(LocalShadeHeaderSwipeRegions provides headerSwipeRegions) {
+            SceneTransitionLayout(
+                state = state,
+                modifier =
+                    Modifier.fillMaxSize().onGloballyPositioned {
+                        headerSwipeRegions.containerCoordinates = it
+                    },
+                swipeSourceDetector =
+                    remember(swipeSourceDetector, headerSwipeRegions) {
+                        ShadeHeaderSwipeSourceDetector(swipeSourceDetector, headerSwipeRegions)
+                    },
+                swipeDetector =
+                    remember {
+                        PassthroughSwipeDetector(velocityThreshold = swipeVelocityThreshold)
+                    },
+                implicitTestTags = isRunningMotionTest,
+                debugName = "SceneContainer",
+            ) {
+                sceneByKey.forEach { (sceneKey, scene) ->
+                    scene(
+                        key = sceneKey,
+                        userActions = userActionsByContentKey.getOrDefault(sceneKey, emptyMap()),
+                        effectFactory = offsetOverscrollEffectFactory,
+                        alwaysCompose = scene.alwaysCompose,
+                    ) {
+                        // Activate the scene.
+                        LaunchedEffect(scene) { scene.activate() }
 
-                    // Render the scene.
-                    with(scene) {
-                        this@scene.Content(
-                            modifier = Modifier.element(sceneKey.rootElementKey).fillMaxSize()
-                        )
+                        // Render the scene.
+                        with(scene) {
+                            this@scene.Content(
+                                modifier = Modifier.element(sceneKey.rootElementKey).fillMaxSize()
+                            )
+                        }
                     }
                 }
-            }
-            overlayByKey.forEach { (overlayKey, overlay) ->
-                overlay(
-                    key = overlayKey,
-                    userActions = userActionsByContentKey.getOrDefault(overlayKey, emptyMap()),
-                    effectFactory = overlayEffectFactory,
-                    alwaysCompose = overlay.alwaysCompose,
-                    // The bouncer overlay is special and not rendered here, so avoid adding
-                    // the fullscreen clickable which modals typically introduce. This avoids
-                    // issues with accessibility touch exploration while on the bouncer.
-                    isModal = overlayKey != Overlays.Bouncer,
-                ) {
-                    // Activate the overlay.
-                    LaunchedEffect(overlay) { overlay.activate() }
+                overlayByKey.forEach { (overlayKey, overlay) ->
+                    overlay(
+                        key = overlayKey,
+                        userActions = userActionsByContentKey.getOrDefault(overlayKey, emptyMap()),
+                        effectFactory = overlayEffectFactory,
+                        alwaysCompose = overlay.alwaysCompose,
+                        // The bouncer overlay is special and not rendered here, so avoid adding
+                        // the fullscreen clickable which modals typically introduce. This avoids
+                        // issues with accessibility touch exploration while on the bouncer.
+                        isModal = overlayKey != Overlays.Bouncer,
+                    ) {
+                        // Activate the overlay.
+                        LaunchedEffect(overlay) { overlay.activate() }
 
-                    if (overlayKey == Overlays.Bouncer) {
-                        // The bouncer overlay is special because it needs to be rendered above the
-                        // notifications which, themselves, are rendered above the scene container.
-                        //
-                        // There is a separate, external, bouncer scene container whose only job is
-                        // to render the bouncer overlay. We still want to have the overlay here in
-                        // this scene container because we still need it to manage transitions in
-                        // and out of that overlay - but we delegate the actual showing and
-                        // transition animations out to that dedicated bouncer scene container.
-                        return@overlay
+                        if (overlayKey == Overlays.Bouncer) {
+                            // Bouncer is rendered by its own container above the notification
+                            // View hierarchy. Keep this entry for navigation and transition state.
+                            return@overlay
+                        }
+
+                        // Render the overlay.
+                        with(overlay) { this@overlay.Content(Modifier) }
                     }
-
-                    // Render the overlay.
-                    with(overlay) { this@overlay.Content(Modifier) }
                 }
             }
         }

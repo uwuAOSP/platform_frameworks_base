@@ -21,11 +21,14 @@ import com.android.compose.animation.scene.Swipe
 import com.android.compose.animation.scene.UserAction
 import com.android.compose.animation.scene.UserActionResult
 import com.android.compose.animation.scene.UserActionResult.HideOverlay
+import com.android.compose.animation.scene.UserActionResult.ReplaceByOverlay
 import com.android.compose.animation.scene.UserActionResult.ShowOverlay
 import com.android.compose.animation.scene.UserActionResult.ShowOverlay.HideCurrentOverlays
 import com.android.systemui.qs.panels.ui.viewmodel.EditModeViewModel
 import com.android.systemui.scene.shared.model.Overlays
+import com.android.systemui.scene.shared.model.TransitionKeys.HorizontalShadeSwipe
 import com.android.systemui.scene.ui.viewmodel.SceneContainerArea.BottomEdge
+import com.android.systemui.scene.ui.viewmodel.SceneContainerArea.ShadeHeader
 import com.android.systemui.scene.ui.viewmodel.SceneContainerArea.TopEdgeStartHalf
 import com.android.systemui.scene.ui.viewmodel.UserActionsViewModel
 import dagger.assisted.AssistedFactory
@@ -49,6 +52,10 @@ constructor(private val editModeViewModel: EditModeViewModel) : UserActionsViewM
                     } else {
                         put(Back, hideQuickSettings)
                         put(Swipe.Up, hideQuickSettings)
+                        put(
+                            Swipe.End(fromSource = ShadeHeader),
+                            ReplaceByOverlay(Overlays.NotificationsShade, HorizontalShadeSwipe),
+                        )
                     }
 
                     put(
