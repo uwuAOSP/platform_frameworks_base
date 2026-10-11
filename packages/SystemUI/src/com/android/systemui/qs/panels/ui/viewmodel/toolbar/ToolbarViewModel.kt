@@ -45,11 +45,9 @@ import com.android.systemui.user.domain.interactor.SelectedUserInteractor
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import javax.inject.Provider
-import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -113,15 +111,6 @@ constructor(
     var securityInfoViewModel: FooterActionsSecurityButtonViewModel? by mutableStateOf(null)
         private set
 
-    /**
-     * Whether the security info text should be shown. When this is `true`, only the icon should be
-     * shown.
-     *
-     * If there's no security info to show, this will also be `true`.
-     */
-    var securityInfoShowCollapsed: Boolean by mutableStateOf(true)
-        private set
-
     override suspend fun onActivated() {
         coroutineScope {
             launch(context = mainDispatcher) {
@@ -144,12 +133,7 @@ constructor(
                 footerActionsInteractor.securityButtonConfig
                     .map { it?.let { securityButtonViewModel(it, ::onSecurityButtonClicked) } }
                     .distinctUntilChanged()
-                    .collectLatest {
-                        securityInfoShowCollapsed = it == null
-                        securityInfoViewModel = it
-                        delay(COLLAPSED_SECURITY_INFO_DELAY)
-                        securityInfoShowCollapsed = true
-                    }
+                    .collect { securityInfoViewModel = it }
             }
         }
     }
@@ -200,9 +184,5 @@ constructor(
     @AssistedFactory
     interface Factory {
         fun create(): ToolbarViewModel
-    }
-
-    private companion object {
-        val COLLAPSED_SECURITY_INFO_DELAY = 5.seconds
     }
 }

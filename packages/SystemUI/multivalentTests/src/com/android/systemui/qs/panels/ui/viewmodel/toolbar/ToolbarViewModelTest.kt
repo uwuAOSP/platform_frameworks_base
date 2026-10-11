@@ -43,10 +43,7 @@ import com.android.systemui.user.data.model.SelectionStatus
 import com.android.systemui.user.data.repository.fakeUserRepository
 import com.android.systemui.user.domain.interactor.fakeHeadlessSystemUserMode
 import com.google.common.truth.Truth.assertThat
-import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.advanceTimeBy
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -61,27 +58,25 @@ class ToolbarViewModelTest : SysuiTestCase() {
         Kosmos.Fixture { toolbarViewModelFactory.create().apply { activateIn(testScope) } }
 
     @Test
-    fun start_noSecurityInfo_collapsed() =
+    fun start_noSecurityInfo() =
         with(kosmos) {
             runTest {
                 assertThat(underTest.securityInfoViewModel).isNull()
-                assertThat(underTest.securityInfoShowCollapsed).isTrue()
             }
         }
 
     @Test
-    fun nullConfig_noSecurityInfo_collapsed() =
+    fun nullConfig_noSecurityInfo() =
         with(kosmos) {
             runTest {
                 setSecurityConfig(null)
 
                 assertThat(underTest.securityInfoViewModel).isNull()
-                assertThat(underTest.securityInfoShowCollapsed).isTrue()
             }
         }
 
     @Test
-    fun config_notCollapsed() =
+    fun config_updatesSecurityInfo() =
         with(kosmos) {
             runTest {
                 setSecurityConfig(MANAGED_CONFIG)
@@ -91,44 +86,14 @@ class ToolbarViewModelTest : SysuiTestCase() {
                     assertThat(model.text).isEqualTo(MANAGED_CONFIG.text)
                     assertThat(onClick).isNotNull()
                 }
-
-                assertThat(underTest.securityInfoShowCollapsed).isFalse()
             }
         }
 
     @Test
-    fun config_notCollapsed_beforeDelay() =
+    fun changeConfig_updatesSecurityInfo() =
         with(kosmos) {
             runTest {
                 setSecurityConfig(MANAGED_CONFIG)
-
-                testScope.advanceTimeBy(COLLAPSED_DELAY - 100.milliseconds)
-
-                assertThat(underTest.securityInfoShowCollapsed).isFalse()
-            }
-        }
-
-    @Test
-    fun config_collapsed_afterDelay() =
-        with(kosmos) {
-            runTest {
-                setSecurityConfig(MANAGED_CONFIG)
-
-                assertThat(underTest.securityInfoShowCollapsed).isFalse()
-
-                testScope.advanceTimeBy(COLLAPSED_DELAY + 100.milliseconds)
-
-                assertThat(underTest.securityInfoShowCollapsed).isTrue()
-            }
-        }
-
-    @Test
-    fun changeConfig_timerRestartedForCollapsed() =
-        with(kosmos) {
-            runTest {
-                setSecurityConfig(MANAGED_CONFIG)
-
-                testScope.advanceTimeBy(COLLAPSED_DELAY - 2.seconds)
 
                 setSecurityConfig(INFO_CONFIG)
 
@@ -137,26 +102,18 @@ class ToolbarViewModelTest : SysuiTestCase() {
                     assertThat(model.text).isEqualTo(INFO_CONFIG.text)
                     assertThat(onClick).isNull()
                 }
-
-                assertThat(underTest.securityInfoShowCollapsed).isFalse()
-
-                testScope.advanceTimeBy(COLLAPSED_DELAY - 100.milliseconds)
-
-                assertThat(underTest.securityInfoShowCollapsed).isFalse()
             }
         }
 
     @Test
-    fun changeConfigToNull_collapsedAgainImmediately() =
+    fun changeConfigToNull_removesSecurityInfo() =
         with(kosmos) {
             runTest {
                 setSecurityConfig(MANAGED_CONFIG)
 
-                testScope.advanceTimeBy(COLLAPSED_DELAY - 2.seconds)
-
                 setSecurityConfig(null)
 
-                assertThat(underTest.securityInfoShowCollapsed).isTrue()
+                assertThat(underTest.securityInfoViewModel).isNull()
             }
         }
 
@@ -310,7 +267,5 @@ class ToolbarViewModelTest : SysuiTestCase() {
                 text = "General information",
                 isClickable = false,
             )
-
-        private val COLLAPSED_DELAY = 5.seconds
     }
 }

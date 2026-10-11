@@ -16,12 +16,7 @@
 
 package com.android.systemui.qs.panels.ui.compose.toolbar
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionLayout
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -70,7 +65,6 @@ import com.android.systemui.common.ui.compose.load
 import com.android.systemui.compose.modifiers.sysuiResTag
 import com.android.systemui.lifecycle.rememberViewModel
 import com.android.systemui.qs.footer.ui.viewmodel.FooterActionsButtonViewModel
-import com.android.systemui.qs.panels.ui.compose.toolbar.Toolbar.TransitionKeys.SecurityInfoKey
 import com.android.systemui.qs.panels.ui.viewmodel.TextFeedbackContentViewModel
 import com.android.systemui.qs.panels.ui.viewmodel.TextFeedbackViewModel
 import com.android.systemui.qs.panels.ui.viewmodel.toolbar.PowerMenuToggleButtonUiState
@@ -78,7 +72,6 @@ import com.android.systemui.qs.panels.ui.viewmodel.toolbar.ToolbarViewModel
 import com.android.systemui.qs.ui.compose.borderOnFocus
 import com.android.systemui.res.R
 
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun Toolbar(
     viewModel: ToolbarViewModel,
@@ -86,33 +79,11 @@ fun Toolbar(
     modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        val securityInfoCollapsed = viewModel.securityInfoShowCollapsed
-
-        SharedTransitionLayout(modifier = Modifier.weight(1f)) {
-            AnimatedContent(
-                targetState = securityInfoCollapsed,
-                contentAlignment = Alignment.CenterStart,
-                label = "Toolbar.CollapsedSecurityInfo",
-            ) { securityInfoCollapsed ->
-                if (securityInfoCollapsed) {
-                    StandardToolbarLayout(
-                        animatedContentScope = this@AnimatedContent,
-                        viewModel = viewModel,
-                        isFullyVisible = isFullyVisible,
-                    )
-                } else {
-                    SecurityInfo(
-                        viewModel = viewModel.securityInfoViewModel,
-                        showCollapsed = false,
-                        modifier =
-                            Modifier.sharedElement(
-                                rememberSharedContentState(key = SecurityInfoKey),
-                                animatedVisibilityScope = this@AnimatedContent,
-                            ),
-                    )
-                }
-            }
-        }
+        StandardToolbarLayout(
+            viewModel = viewModel,
+            isFullyVisible = isFullyVisible,
+            modifier = Modifier.weight(1f),
+        )
 
         if (viewModel.useInlinePowerMenu) {
             Box {
@@ -136,10 +107,8 @@ fun Toolbar(
     }
 }
 
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-private fun SharedTransitionScope.StandardToolbarLayout(
-    animatedContentScope: AnimatedContentScope,
+private fun StandardToolbarLayout(
     viewModel: ToolbarViewModel,
     isFullyVisible: () -> Boolean,
     modifier: Modifier = Modifier,
@@ -168,11 +137,6 @@ private fun SharedTransitionScope.StandardToolbarLayout(
         SecurityInfo(
             viewModel = viewModel.securityInfoViewModel,
             showCollapsed = true,
-            modifier =
-                Modifier.sharedElement(
-                    rememberSharedContentState(key = SecurityInfoKey),
-                    animatedVisibilityScope = animatedContentScope,
-                ),
         )
 
         // Text feedback chip / build number
@@ -332,12 +296,6 @@ private fun ToolbarTextFeedback(
         ) {
             TextFeedback(viewModel = viewModel.textFeedback)
         }
-    }
-}
-
-private object Toolbar {
-    object TransitionKeys {
-        const val SecurityInfoKey = "SecurityInfo"
     }
 }
 
