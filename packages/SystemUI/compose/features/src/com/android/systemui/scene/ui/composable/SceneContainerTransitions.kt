@@ -15,6 +15,7 @@ import com.android.systemui.res.R
 import com.android.systemui.scene.shared.model.Overlays
 import com.android.systemui.scene.shared.model.Scenes
 import com.android.systemui.scene.shared.model.TransitionKeys
+import com.android.systemui.scene.shared.model.TransitionKeys.HorizontalShadeSwipe
 import com.android.systemui.scene.shared.model.TransitionKeys.SlightlyFasterShadeTransition
 import com.android.systemui.scene.shared.model.TransitionKeys.SystemCommunalTransition
 import com.android.systemui.scene.shared.model.TransitionKeys.ToAlwaysOnDisplay
@@ -39,6 +40,7 @@ import com.android.systemui.scene.ui.composable.transitions.goneToAodEnterFromTo
 import com.android.systemui.scene.ui.composable.transitions.goneToQuickSettingsTransition
 import com.android.systemui.scene.ui.composable.transitions.goneToSingleShadeTransition
 import com.android.systemui.scene.ui.composable.transitions.goneToSplitShadeTransition
+import com.android.systemui.scene.ui.composable.transitions.horizontalShadeSwipeTransition
 import com.android.systemui.scene.ui.composable.transitions.lockscreenToBouncerTransition
 import com.android.systemui.scene.ui.composable.transitions.lockscreenToCommunalSystemTransition
 import com.android.systemui.scene.ui.composable.transitions.lockscreenToCommunalUserTransition
@@ -407,6 +409,19 @@ class SceneContainerTransitions : SceneContainerTransitionsBuilder {
             }
 
             // Overlay transitions
+
+            from(
+                Overlays.NotificationsShade,
+                to = Overlays.QuickSettingsShade,
+                key = HorizontalShadeSwipe,
+                cuj = Cuj.CUJ_NOTIFICATION_SHADE_QS_EXPAND_COLLAPSE,
+            ) {
+                horizontalShadeSwipeTransition(
+                    isRtl =
+                        resources.configuration.layoutDirection ==
+                            android.view.View.LAYOUT_DIRECTION_RTL
+                )
+            }
 
             to(Overlays.QuickActions) { toQuickActionsTransition() }
 

@@ -76,6 +76,8 @@ sealed class SceneContainerArea(private val resolveArea: (LayoutDirection) -> Re
 
     data object BottomEdge : SceneContainerArea(resolveArea = { Resolved.BottomEdge })
 
+    data object ShadeHeader : SceneContainerArea(resolveArea = { Resolved.ShadeHeader })
+
     override fun resolve(layoutDirection: LayoutDirection): Resolved {
         return resolveArea(layoutDirection)
     }
@@ -90,6 +92,8 @@ sealed class SceneContainerArea(private val resolveArea: (LayoutDirection) -> Re
         data object RightEdge : Resolved
 
         data object RightHalf : Resolved
+
+        data object ShadeHeader : Resolved
 
         /** The left half of the top edge of the display. */
         data object TopEdgeLeftHalf : Resolved

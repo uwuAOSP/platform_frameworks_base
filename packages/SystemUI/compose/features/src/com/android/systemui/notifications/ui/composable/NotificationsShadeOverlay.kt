@@ -33,12 +33,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.android.compose.animation.scene.ContentScope
 import com.android.compose.animation.scene.ElementKey
@@ -62,10 +60,11 @@ import com.android.systemui.scene.session.ui.composable.SaveableSession
 import com.android.systemui.scene.shared.model.Overlays
 import com.android.systemui.scene.ui.composable.LocalSceneContainerPreloadedResources
 import com.android.systemui.scene.ui.composable.Overlay
+import com.android.systemui.shade.ui.composable.BindNotificationShadeSwipe
 import com.android.systemui.shade.ui.composable.ChipHighlightModel
 import com.android.systemui.shade.ui.composable.OverlayShade
 import com.android.systemui.shade.ui.composable.OverlayShadeHeader
-import com.android.systemui.shade.ui.composable.switchShadeOnHorizontalSwipe
+import com.android.systemui.shade.ui.composable.shadeHeaderSwipeRegion
 import com.android.systemui.statusbar.notification.stack.ui.view.NotificationScrollView
 import dagger.Lazy
 import javax.inject.Inject
@@ -154,17 +153,8 @@ constructor(
                         quickSettingsHighlight = headerViewModel.inactiveChipHighlight,
                         showClock = !isFullWidth,
                         modifier =
-                            Modifier.element(NotificationsShade.Elements.StatusBar).then(
-                                if (viewModel.isDualShade) {
-                                    Modifier.switchShadeOnHorizontalSwipe(
-                                        swipeLeft =
-                                            LocalLayoutDirection.current == LayoutDirection.Ltr,
-                                        onSwipe = headerViewModel::onSystemIconChipClicked,
-                                    )
-                                } else {
-                                    Modifier
-                                }
-                            ),
+                            Modifier.element(NotificationsShade.Elements.StatusBar)
+                                .shadeHeaderSwipeRegion(viewModel.isDualShade),
                     )
                 }
             },
@@ -204,6 +194,7 @@ constructor(
                 }
 
                 val stackScrollView = stackScrollView.get()
+                BindNotificationShadeSwipe(stackScrollView)
                 ScrollingNotificationPanel(
                     tag = "NotifShadeOverlay",
                     shadeSession = shadeSession,

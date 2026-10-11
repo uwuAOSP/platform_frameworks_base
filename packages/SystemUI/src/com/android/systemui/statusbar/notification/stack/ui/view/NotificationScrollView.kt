@@ -62,6 +62,11 @@ interface NotificationScrollView {
     /** Alpha set on the placeholder composable. */
     fun setPlaceholderAlpha(alpha: Float)
 
+    /**
+     * Drawing-only motion for a dual-shade horizontal swipe; progress 1 restores normal drawing.
+     */
+    fun setShadeSwipeProgress(visibleProgress: Float, direction: Float)
+
     /** Set whether this view is occluded by something else. */
     fun setOccluded(isOccluded: Boolean)
 
