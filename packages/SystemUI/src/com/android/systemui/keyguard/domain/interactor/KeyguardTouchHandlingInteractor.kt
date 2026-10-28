@@ -45,7 +45,7 @@ import com.android.systemui.scene.shared.flag.SceneContainerFlag
 import com.android.systemui.securelockdevice.domain.interactor.SecureLockDeviceInteractor
 import com.android.systemui.shade.PulsingGestureListener
 import com.android.systemui.shade.ShadeDisplayAware
-import com.android.systemui.shared.settings.data.repository.SecureSettingsRepository
+import com.android.systemui.shared.settings.data.repository.SystemSettingsRepository
 import com.android.systemui.statusbar.phone.StatusBarKeyguardViewManager
 import com.android.systemui.statusbar.policy.AccessibilityManagerWrapper
 import com.android.systemui.util.time.SystemClock
@@ -85,7 +85,7 @@ constructor(
     private val faceAuthInteractor: DeviceEntryFaceAuthInteractor,
     private val deviceEntryInteractor: DeviceEntryInteractor,
     private val powerInteractor: PowerInteractor,
-    private val secureSettingsRepository: SecureSettingsRepository,
+    private val systemSettingsRepository: SystemSettingsRepository,
     private val powerManager: PowerManager,
     private val systemClock: SystemClock,
     private val pointerDeviceRepository: PointerDeviceRepository,
@@ -274,7 +274,7 @@ constructor(
     }
 
     private fun isDoubleTapSettingEnabled(): Flow<Boolean> {
-        return secureSettingsRepository.boolSetting(Settings.Secure.DOUBLE_TAP_TO_SLEEP)
+        return systemSettingsRepository.boolSetting(Settings.System.DOUBLE_TAP_SLEEP_GESTURE)
     }
 
     private fun showSettings() {
