@@ -29,6 +29,7 @@ import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
@@ -36,11 +37,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.integerResource
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.android.compose.animation.scene.ContentScope
 import com.android.compose.modifiers.padding
+import com.android.systemui.Prefs
 import com.android.systemui.common.ui.compose.PagerDots
 import com.android.systemui.compose.modifiers.sysuiResTag
 import com.android.systemui.development.ui.compose.BuildNumber
@@ -54,6 +57,8 @@ import com.android.systemui.qs.panels.ui.viewmodel.PaginatedGridViewModel
 import com.android.systemui.qs.panels.ui.viewmodel.TileViewModel
 import com.android.systemui.qs.panels.ui.viewmodel.toolbar.EditModeButtonViewModel
 import com.android.systemui.res.R
+import com.android.systemui.shade.ui.composable.LocalDualShadeMotion
+import com.android.systemui.shade.ui.composable.dualShadePart
 import javax.inject.Inject
 
 class PaginatedGridLayout
@@ -85,7 +90,30 @@ constructor(
                 delegateGridViewModel.splitIntoPages(tiles, rows)
             }
 
-        val pagerState = rememberPagerState(0) { pages.size }
+        val dualShadeMotion = LocalDualShadeMotion.current
+        val context = LocalContext.current
+        val savedPage =
+            remember(context) {
+                Prefs.getInt(context, Prefs.Key.DUAL_SHADE_QUICK_SETTINGS_PAGE, 0).coerceAtLeast(0)
+            }
+        val pagerState =
+            rememberPagerState(
+                if (dualShadeMotion != null)
+                    savedPage.coerceAtMost((pages.size - 1).coerceAtLeast(0))
+                else 0
+            ) {
+                pages.size
+            }
+        DisposableEffect(pagerState, dualShadeMotion, context) {
+            onDispose {
+                if (dualShadeMotion != null)
+                    Prefs.putInt(
+                        context,
+                        Prefs.Key.DUAL_SHADE_QUICK_SETTINGS_PAGE,
+                        pagerState.currentPage,
+                    )
+            }
+        }
 
         LaunchedEffect(listening, pagerState) {
             snapshotFlow { listening() }
@@ -94,7 +122,7 @@ constructor(
                     // page. If we did this when going from listening to not listening, opening
                     // edit mode in second page will cause it to go to first page during the
                     // transition.
-                    if (listening()) {
+                    if (listening() && dualShadeMotion == null) {
                         pagerState.scrollToPage(0)
                     }
                 }
@@ -189,7 +217,10 @@ private fun FooterBar(
     // * On the end side, we place the edit mode button, with the same constraints as for
     //   BuildNumber (but it will usually fit, as it's just a square button).
     Row(
-        modifier = Modifier.requiredHeight(FooterHeight).fillMaxWidth(),
+        modifier =
+            Modifier.requiredHeight(FooterHeight)
+                .fillMaxWidth()
+                .dualShadePart(rank = 8f, key = "pagerFooter"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = spacedBy(8.dp),
     ) {

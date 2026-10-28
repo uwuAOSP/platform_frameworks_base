@@ -26,6 +26,8 @@ import android.service.quicksettings.Tile.STATE_INACTIVE
 import androidx.annotation.VisibleForTesting
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Indication
 import androidx.compose.foundation.LocalIndication
@@ -97,9 +99,6 @@ import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults.ActiveTileCornerRadius
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults.InactiveIconCornerRadius
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults.InactiveTileCornerRadius
-import org.uwuaosp.systemui.qsstyle.CircularCornerRadius
-import org.uwuaosp.systemui.qsstyle.CircularTileHeight
-import org.uwuaosp.systemui.qsstyle.LocalQSTileStyle
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults.TileHeight
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults.longPressLabelMoreDetails
 import com.android.systemui.qs.panels.ui.compose.infinitegrid.CommonTileDefaults.longPressLabelSettings
@@ -115,7 +114,14 @@ import com.android.systemui.qs.tileimpl.QSTileImpl
 import com.android.systemui.qs.ui.composable.QuickSettingsShade
 import com.android.systemui.qs.ui.compose.borderOnFocus
 import com.android.systemui.res.R
+import com.android.systemui.shade.ui.composable.DualShadeMotion
+import com.android.systemui.shade.ui.composable.LocalDualShadeMotion
+import com.android.systemui.shade.ui.composable.dualShadeControlGesture
+import com.android.systemui.shade.ui.composable.dualShadePress
 import kotlinx.coroutines.CoroutineScope
+import org.uwuaosp.systemui.qsstyle.CircularCornerRadius
+import org.uwuaosp.systemui.qsstyle.CircularTileHeight
+import org.uwuaosp.systemui.qsstyle.LocalQSTileStyle
 import platform.test.motion.compose.values.MotionTestValueKey
 import platform.test.motion.compose.values.motionTestValues
 
@@ -193,7 +199,16 @@ fun ContentScope.Tile(
         // and for the Expandable of the default style: the circular style hosts its Expandable on
         // the icon, whose own size already makes that shape a circle.
         val tileShape by TileDefaults.animateTileShapeAsState(uiState, circular)
-        val animatedColor by animateColorAsState(colors.background, label = "QSTileBackgroundColor")
+        val dualShadeMotion = LocalDualShadeMotion.current
+        val animatedColor by
+            animateColorAsState(
+                colors.background,
+                animationSpec =
+                    if (dualShadeMotion != null)
+                        tween(DualShadeMotion.ToggleDuration, easing = DualShadeMotion.ToggleEasing)
+                    else spring(),
+                label = "QSTileBackgroundColor",
+            )
         val isDualTarget = uiState.handlesToggleClick
         val hasLongClickEffect = uiState.hasLongClickEffect
         val interactionSource = remember { MutableInteractionSource() }
@@ -237,14 +252,13 @@ fun ContentScope.Tile(
         ) { modifier ->
             val tileModifier =
                 modifier
+                    .dualShadePress(interactionSource)
+                    .dualShadeControlGesture()
                     .then(surfaceRevealModifier)
-                    .borderOnFocus(
-                        color = MaterialTheme.colorScheme.secondary,
-                        tileShape.topEnd,
-                    )
+                    .borderOnFocus(color = MaterialTheme.colorScheme.secondary, tileShape.topEnd)
                     .sysuiResTag("tile_expandable")
                     .fillMaxWidth()
-                    .thenIf(!circular) {
+                    .thenIf(!circular && dualShadeMotion == null) {
                         Modifier.bounceable(
                             currentBounceableInfo.bounceable,
                             currentBounceableInfo.previousTile,
@@ -263,7 +277,8 @@ fun ContentScope.Tile(
             // Bounce the tile's container if it is toggleable and is not a large
             // dual target tile. These don't toggle on main click.
             val bounceContainer = uiState.isToggleable && (iconOnly || !isDualTarget)
-            val clickInteractionSource = interactionSource.takeIf { bounceContainer }
+            val clickInteractionSource =
+                interactionSource.takeIf { bounceContainer || dualShadeMotion != null }
 
             fun handleClick(expandable: Expandable) {
                 if (!isClickable) return
@@ -288,7 +303,7 @@ fun ContentScope.Tile(
 
                 coroutineScope.launch {
                     // Bounce the content of the tile if we're not animating the container.
-                    if (!bounceContainer) {
+                    if (!bounceContainer && dualShadeMotion == null) {
                         currentBounceableInfo.bounceable.animateContentBounce(iconOnly)
                     }
                 }
@@ -333,8 +348,7 @@ fun ContentScope.Tile(
             val stateAwareExpandable = {
                 hapticsViewModel
                     .takeIf { hasLongClickEffect }
-                    ?.createStateAwareExpandable(expandable)
-                    ?: expandable
+                    ?.createStateAwareExpandable(expandable) ?: expandable
             }
 
             // Content of the tile, shared by both styles.
