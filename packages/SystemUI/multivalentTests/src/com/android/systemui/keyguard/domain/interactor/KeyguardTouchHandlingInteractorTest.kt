@@ -50,14 +50,14 @@ import com.android.systemui.scene.domain.interactor.SceneInteractor
 import com.android.systemui.scene.domain.interactor.sceneInteractor
 import com.android.systemui.securelockdevice.domain.interactor.secureLockDeviceInteractor
 import com.android.systemui.shade.PulsingGestureListener
-import com.android.systemui.shared.settings.data.repository.SecureSettingsRepository
+import com.android.systemui.shared.settings.data.repository.SystemSettingsRepository
 import com.android.systemui.statusbar.phone.StatusBarKeyguardViewManager
 import com.android.systemui.statusbar.phone.statusBarKeyguardViewManager
 import com.android.systemui.statusbar.policy.AccessibilityManagerWrapper
 import com.android.systemui.testKosmos
 import com.android.systemui.util.mockito.mock
 import com.android.systemui.util.mockito.whenever
-import com.android.systemui.util.settings.data.repository.userAwareSecureSettingsRepository
+import com.android.systemui.util.settings.data.repository.userAwareSystemSettingsRepository
 import com.android.systemui.util.time.fakeSystemClock
 import com.android.systemui.wallpapers.domain.interactor.wallpaperFocalAreaInteractor
 import com.google.common.truth.Truth.assertThat
@@ -94,7 +94,7 @@ class KeyguardTouchHandlingInteractorTest : SysuiTestCase() {
     private lateinit var testScope: TestScope
     private lateinit var keyguardRepository: KeyguardRepository
     private lateinit var keyguardTransitionRepository: FakeKeyguardTransitionRepository
-    private lateinit var secureSettingsRepository: SecureSettingsRepository
+    private lateinit var systemSettingsRepository: SystemSettingsRepository
     private lateinit var sceneInteractor: SceneInteractor
     private lateinit var statusBarKeyguardViewManager: StatusBarKeyguardViewManager
 
@@ -107,7 +107,7 @@ class KeyguardTouchHandlingInteractorTest : SysuiTestCase() {
         testScope = kosmos.testScope
         keyguardRepository = kosmos.fakeKeyguardRepository
         keyguardTransitionRepository = kosmos.fakeKeyguardTransitionRepository
-        secureSettingsRepository = kosmos.userAwareSecureSettingsRepository
+        systemSettingsRepository = kosmos.userAwareSystemSettingsRepository
         sceneInteractor = kosmos.sceneInteractor
         statusBarKeyguardViewManager = kosmos.statusBarKeyguardViewManager
 
@@ -315,7 +315,7 @@ class KeyguardTouchHandlingInteractorTest : SysuiTestCase() {
     @EnableFlags(FLAG_DOUBLE_TAP_TO_SLEEP)
     fun isDoubleTapEnabled_flagEnabled_userSettingEnabled_onlyTrueInLockScreenState() {
         testScope.runTest {
-            secureSettingsRepository.setBoolean(Settings.Secure.DOUBLE_TAP_TO_SLEEP, true)
+            systemSettingsRepository.setInt(Settings.System.DOUBLE_TAP_SLEEP_GESTURE, 1)
 
             val isEnabled = collectLastValue(underTest.isDoubleTapHandlingEnabled)
             KeyguardState.entries.forEach { keyguardState ->
@@ -334,7 +334,7 @@ class KeyguardTouchHandlingInteractorTest : SysuiTestCase() {
     @EnableFlags(FLAG_DOUBLE_TAP_TO_SLEEP)
     fun isDoubleTapEnabled_flagEnabled_userSettingDisabled_alwaysFalse() {
         testScope.runTest {
-            secureSettingsRepository.setBoolean(Settings.Secure.DOUBLE_TAP_TO_SLEEP, false)
+            systemSettingsRepository.setInt(Settings.System.DOUBLE_TAP_SLEEP_GESTURE, 0)
 
             val isEnabled = collectLastValue(underTest.isDoubleTapHandlingEnabled)
             KeyguardState.entries.forEach { keyguardState ->
@@ -349,7 +349,7 @@ class KeyguardTouchHandlingInteractorTest : SysuiTestCase() {
     @DisableFlags(FLAG_DOUBLE_TAP_TO_SLEEP)
     fun isDoubleTapEnabled_flagDisabled_userSettingEnabled_alwaysFalse() {
         testScope.runTest {
-            secureSettingsRepository.setBoolean(Settings.Secure.DOUBLE_TAP_TO_SLEEP, true)
+            systemSettingsRepository.setInt(Settings.System.DOUBLE_TAP_SLEEP_GESTURE, 1)
 
             val isEnabled = collectLastValue(underTest.isDoubleTapHandlingEnabled)
             KeyguardState.entries.forEach { keyguardState ->
@@ -364,7 +364,7 @@ class KeyguardTouchHandlingInteractorTest : SysuiTestCase() {
     @EnableFlags(FLAG_DOUBLE_TAP_TO_SLEEP)
     fun isDoubleTapEnabled_flagEnabledAndConfigDisabled_alwaysFalse() {
         testScope.runTest {
-            secureSettingsRepository.setBoolean(Settings.Secure.DOUBLE_TAP_TO_SLEEP, true)
+            systemSettingsRepository.setInt(Settings.System.DOUBLE_TAP_SLEEP_GESTURE, 1)
             overrideResource(com.android.internal.R.bool.config_supportDoubleTapSleep, false)
             createUnderTest()
 
@@ -381,7 +381,7 @@ class KeyguardTouchHandlingInteractorTest : SysuiTestCase() {
     @EnableFlags(FLAG_DOUBLE_TAP_TO_SLEEP)
     fun isDoubleTapEnabled_quickSettingsVisible_alwaysFalse() {
         testScope.runTest {
-            secureSettingsRepository.setBoolean(Settings.Secure.DOUBLE_TAP_TO_SLEEP, true)
+            systemSettingsRepository.setInt(Settings.System.DOUBLE_TAP_SLEEP_GESTURE, 1)
 
             val isEnabled = collectLastValue(underTest.isDoubleTapHandlingEnabled)
             KeyguardState.entries.forEach { keyguardState ->
@@ -396,7 +396,7 @@ class KeyguardTouchHandlingInteractorTest : SysuiTestCase() {
     @EnableFlags(FLAG_DOUBLE_TAP_TO_SLEEP)
     fun onDoubleClick_doubleTapEnabled() {
         testScope.runTest {
-            secureSettingsRepository.setBoolean(Settings.Secure.DOUBLE_TAP_TO_SLEEP, true)
+            systemSettingsRepository.setInt(Settings.System.DOUBLE_TAP_SLEEP_GESTURE, 1)
             val isEnabled by collectLastValue(underTest.isDoubleTapHandlingEnabled)
             runCurrent()
 
@@ -411,7 +411,7 @@ class KeyguardTouchHandlingInteractorTest : SysuiTestCase() {
     @EnableFlags(FLAG_DOUBLE_TAP_TO_SLEEP)
     fun onDoubleClick_doubleTapDisabled() {
         testScope.runTest {
-            secureSettingsRepository.setBoolean(Settings.Secure.DOUBLE_TAP_TO_SLEEP, false)
+            systemSettingsRepository.setInt(Settings.System.DOUBLE_TAP_SLEEP_GESTURE, 0)
             val isEnabled by collectLastValue(underTest.isDoubleTapHandlingEnabled)
             runCurrent()
 
@@ -454,7 +454,7 @@ class KeyguardTouchHandlingInteractorTest : SysuiTestCase() {
                 faceAuthInteractor = kosmos.deviceEntryFaceAuthInteractor,
                 deviceEntryInteractor = kosmos.deviceEntryInteractor,
                 powerInteractor = kosmos.powerInteractor,
-                secureSettingsRepository = secureSettingsRepository,
+                systemSettingsRepository = systemSettingsRepository,
                 powerManager = powerManager,
                 systemClock = kosmos.fakeSystemClock,
                 pointerDeviceRepository = kosmos.pointerDeviceRepository,

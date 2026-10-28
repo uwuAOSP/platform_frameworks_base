@@ -31,7 +31,7 @@ import com.android.systemui.power.domain.interactor.powerInteractor
 import com.android.systemui.securelockdevice.domain.interactor.secureLockDeviceInteractor
 import com.android.systemui.shade.pulsingGestureListener
 import com.android.systemui.statusbar.phone.statusBarKeyguardViewManager
-import com.android.systemui.util.settings.data.repository.userAwareSecureSettingsRepository
+import com.android.systemui.util.settings.data.repository.userAwareSystemSettingsRepository
 import com.android.systemui.util.time.fakeSystemClock
 import com.android.systemui.wallpapers.domain.interactor.wallpaperFocalAreaInteractor
 
@@ -50,7 +50,7 @@ val Kosmos.keyguardTouchHandlingInteractor by
             faceAuthInteractor = deviceEntryFaceAuthInteractor,
             powerInteractor = powerInteractor,
             deviceEntryInteractor = deviceEntryInteractor,
-            secureSettingsRepository = userAwareSecureSettingsRepository,
+            systemSettingsRepository = userAwareSystemSettingsRepository,
             powerManager = powerManager,
             systemClock = fakeSystemClock,
             pointerDeviceRepository = pointerDeviceRepository,
