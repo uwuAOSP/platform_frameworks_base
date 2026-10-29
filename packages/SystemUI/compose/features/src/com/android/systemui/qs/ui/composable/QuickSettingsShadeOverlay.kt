@@ -447,16 +447,16 @@ private fun ContentScope.QuickSettingsLayout(
                             key =
                                 if (circular) QuickSettings.Elements.CircularBrightnessSlider
                                 else QuickSettings.Elements.BrightnessSlider,
-                            modifier =
-                                Modifier.dualShadePart(rank = 1f, key = "brightness")
-                                    .dualShadeControlGesture(),
+                            modifier = Modifier,
                         ) {
                             Box(
-                                Modifier.systemGestureExclusionInShade(
-                                    enabled = {
-                                        layoutState.transitionState is TransitionState.Idle
-                                    }
-                                )
+                                Modifier.dualShadePart(rank = 1f, key = "brightness")
+                                    .dualShadeControlGesture()
+                                    .systemGestureExclusionInShade(
+                                        enabled = {
+                                            layoutState.transitionState is TransitionState.Idle
+                                        }
+                                    )
                             ) {
                                 BrightnessSliderContainer(
                                     viewModel = qsContainerViewModel.brightnessSliderViewModel,

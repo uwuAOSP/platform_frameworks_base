@@ -150,15 +150,15 @@ constructor(
         ) { spanIndex, column, isFirstInColumn, isLastInColumn ->
             val it = sizedTiles[spanIndex]
 
-            Element(
-                it.tile.spec.toElementKey(),
-                Modifier.dualShadePart(
-                    rank = 2f + rows[spanIndex] + column * 0.08f,
-                    key = it.tile.spec,
-                ),
-            ) {
+            // Scene coordinates describe the resting tile; only its contents carry the effect.
+            Element(it.tile.spec.toElementKey(), Modifier) {
                 Tile(
                     tile = it.tile,
+                    modifier =
+                        Modifier.dualShadePart(
+                            rank = 2f + rows[spanIndex] + column * 0.08f,
+                            key = it.tile.spec,
+                        ),
                     // The circular style shows a label under every tile, so no tile is icon only.
                     iconOnly = !circular && iconTilesViewModel.isIconTile(it.tile.spec),
                     circular = circular,
