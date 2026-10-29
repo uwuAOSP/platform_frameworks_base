@@ -6924,8 +6924,8 @@ public class NotificationStackScrollLayout
         for (int i = 0; i < getChildCount(); i++) {
             View child = getChildAt(i);
             if (child instanceof ExpandableView row) {
-                // 切换时暂时不可见的卡片保留进度和次序，避免重新出现时跳过动画
-                // 展开面板中的置顶通知随列表运动，面板外的悬浮通知保留原有动画
+                // Preserve progress and order while cards are temporarily invisible during a switch.
+                // Move pinned rows with the expanded shade; preserve floating heads-up animations.
                 boolean eligible = child.getVisibility() != GONE
                         && (mIsExpanded || !row.isHeadsUpState())
                         && !row.isExpandAnimationRunning()

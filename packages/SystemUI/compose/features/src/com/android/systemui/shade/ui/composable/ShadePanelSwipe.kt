@@ -104,7 +104,7 @@ fun Modifier.shadePanelSwipe(
                         val y = abs(displacement.y)
                         val distance = hypot(x, y)
                         if (distance <= viewConfiguration.touchSlop) continue
-                        // 方向边界与FalsingDataProvider一致，避免同一斜滑被判成两个方向
+                        // Match FalsingDataProvider so diagonal gestures use the same direction boundary.
                         if (x <= y) {
                             if (!blockVerticalScroll) break
                             blockingDrag = true
@@ -124,7 +124,7 @@ fun Modifier.shadePanelSwipe(
                 if (dragging) {
                     val horizontalVelocity = Velocity(velocity.x, 0f)
                     val returnDrag = !released && gestureContext.isActive
-                    // 取消或多指打断时归还拖动量，停止任务随父级dispatcher完成
+                    // Return drag deltas on cancellation; let the parent dispatcher own completion.
                     dispatcher.coroutineScope.launch(start = CoroutineStart.UNDISPATCHED) {
                         if (returnDrag) scroll(-consumedX)
                         val consumed = dispatcher.dispatchPreFling(horizontalVelocity)

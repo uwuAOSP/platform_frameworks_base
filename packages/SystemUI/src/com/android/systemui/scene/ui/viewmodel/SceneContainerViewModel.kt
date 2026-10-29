@@ -128,7 +128,7 @@ constructor(
         val reason: String,
     )
 
-    // 拒绝结果属于本次切换，不能影响下一次到同一页面的手势
+    // Scope rejection to this transition, not subsequent gestures to the same destination.
     private var gestureRejection: GestureRejection? = null
 
     /**
@@ -569,7 +569,7 @@ constructor(
             }
 
         return interactionTypeOrNull?.let { interactionType ->
-            // 解锁后也记录真实手势分类，保持反误触历史一致
+            // Keep recording gesture classifications after unlock for consistent falsing history.
             val isFalseTouch = falsingInteractor.isFalseTouch(interactionType)
             val fromLockscreen = transition.currentSceneWhenTransitionStarted == Scenes.Lockscreen
             !fromLockscreen || !isFalseTouch
