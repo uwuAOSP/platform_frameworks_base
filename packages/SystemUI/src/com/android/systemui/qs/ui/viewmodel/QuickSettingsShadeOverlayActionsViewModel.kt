@@ -57,6 +57,10 @@ constructor(
                     put(Swipe.Up, hideQuickSettings)
                     if (shadeMode is ShadeMode.Dual) {
                         put(
+                            Swipe.Left,
+                            ReplaceByOverlay(Overlays.NotificationsShade, TransitionKeys.ShadeSwipeLeft),
+                        )
+                        put(
                             Swipe.Right,
                             ReplaceByOverlay(Overlays.NotificationsShade, TransitionKeys.ShadeSwipeRight),
                         )
