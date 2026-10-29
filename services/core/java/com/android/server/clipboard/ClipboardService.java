@@ -80,6 +80,9 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.IUserManager;
+import android.app.UwuAppPolicyManager;
+import android.os.Bundle;
+import android.os.UserManager;
 import android.os.Looper;
 import android.os.Message;
 import android.os.Parcel;
@@ -236,6 +239,7 @@ public class ClipboardService extends SystemService {
     private int mMaxClassificationLength = DEFAULT_MAX_CLASSIFICATION_LENGTH;
 
     private final Object mLock = new Object();
+    private final Object mPolicyRefreshLock = new Object();
 
     /**
      * Instantiates the clipboard.
@@ -292,42 +296,86 @@ public class ClipboardService extends SystemService {
         publishBinderService(Context.CLIPBOARD_SERVICE, new ClipboardImpl());
         LocalServices.addService(ClipboardManagerInternal.class, new ClipboardInternalImpl());
         registerVirtualDeviceListener();
-        final ContentObserver policyObserver = new ContentObserver(mWorkerHandler) {
-            @Override
-            public void onChange(boolean selfChange, Uri uri, int userId) {
-                synchronized (mLock) {
-                    if (userId >= UserHandle.USER_SYSTEM) {
-                        mClipboardReadPolicies.remove(userId);
-                        mClipboardWritePolicies.remove(userId);
-                        mClipboardPromptsEnabled.delete(userId);
-                    } else {
-                        mClipboardReadPolicies.clear();
-                        mClipboardWritePolicies.clear();
-                        mClipboardPromptsEnabled.clear();
-                    }
-                    final int operation = Settings.Secure.getUriFor(
-                            Settings.Secure.UWU_APP_CLIPBOARD_READ_POLICIES).equals(uri)
-                            ? ClipboardAccessPromptActivity.OPERATION_READ
-                            : Settings.Secure.getUriFor(
-                                    Settings.Secure.UWU_APP_CLIPBOARD_WRITE_POLICIES).equals(uri)
-                                    ? ClipboardAccessPromptActivity.OPERATION_WRITE : -1;
-                    mClipboardAccessState.invalidateDecisions(userId, operation);
-                    if (operation != ClipboardAccessPromptActivity.OPERATION_READ) {
-                        updatePendingClipboardWritePoliciesLocked(userId);
-                    }
-                }
+        final ContentObserver observer = new ContentObserver(mWorkerHandler) {
+            @Override public void onChange(boolean selfChange, Uri uri, int userId) {
+                if (userId >= 0) reloadUwuClipboardPolicies(userId);
+                else for (UserHandle user : getContext().getSystemService(UserManager.class)
+                        .getUserHandles(true)) reloadUwuClipboardPolicies(user.getIdentifier());
             }
         };
-        final String[] policySettings = {
-                Settings.Secure.UWU_APP_CLIPBOARD_POLICIES,
-                Settings.Secure.UWU_APP_CLIPBOARD_READ_POLICIES,
-                Settings.Secure.UWU_APP_CLIPBOARD_WRITE_POLICIES,
-                Settings.Secure.UWU_APP_CLIPBOARD_PROMPTS_ENABLED,
-        };
-        for (String policySetting : policySettings) {
-            getContext().getContentResolver().registerContentObserver(
-                    Settings.Secure.getUriFor(policySetting), false, policyObserver,
-                    UserHandle.USER_ALL);
+        getContext().getContentResolver().registerContentObserver(Settings.Secure.getUriFor(
+                Settings.Secure.UWU_APP_CLIPBOARD_PROMPTS_ENABLED), false, observer,
+                UserHandle.USER_ALL);
+    }
+
+    @Override public void onBootPhase(int phase) {
+        if (phase != PHASE_THIRD_PARTY_APPS_CAN_START) return;
+        UwuAppPolicyManager.watch(getContext(), mWorkerHandler, UwuAppPolicyManager.FEATURE_CLIPBOARD,
+                this::reloadUwuClipboardPolicies);
+        UwuAppPolicyManager.watchPackageRemoval(getContext(), mWorkerHandler,
+                this::reloadUwuClipboardPolicies);
+        for (UserHandle user : getContext().getSystemService(UserManager.class).getUserHandles(true)) {
+            reloadUwuClipboardPolicies(user.getIdentifier());
+        }
+    }
+
+    @Override public void onUserStarting(@NonNull TargetUser user) {
+        mWorkerHandler.post(() -> reloadUwuClipboardPolicies(user.getUserIdentifier()));
+    }
+
+    private void reloadUwuClipboardPolicies(int userId) {
+        synchronized (mPolicyRefreshLock) { reloadUwuClipboardPoliciesSerialized(userId); }
+    }
+
+    private void reloadUwuClipboardPoliciesSerialized(int userId) {
+        if (userId < 0) return;
+        Bundle snapshot = UwuAppPolicyManager.snapshot(userId);
+        if (!UwuAppPolicyManager.migrated(snapshot, UwuAppPolicyManager.FEATURE_CLIPBOARD)) {
+            Bundle legacy = new Bundle();
+            for (int type = 0; type < 2; type++) {
+                ArrayMap<String, Integer> old = parseClipboardAccessPolicies(
+                        Settings.Secure.getStringForUser(getContext().getContentResolver(),
+                                Settings.Secure.UWU_APP_CLIPBOARD_POLICIES, userId));
+                old.putAll(parseClipboardAccessPolicies(Settings.Secure.getStringForUser(
+                        getContext().getContentResolver(), clipboardPolicySetting(type == 0
+                                ? AppOpsManager.OP_READ_CLIPBOARD : AppOpsManager.OP_WRITE_CLIPBOARD),
+                        userId)));
+                for (int i = 0; i < old.size(); i++) {
+                    int[] values = legacy.getIntArray(old.keyAt(i));
+                    if (values == null) values = UwuAppPolicyManager.defaults();
+                    values[type] = old.valueAt(i);
+                    legacy.putIntArray(old.keyAt(i), values);
+                }
+            }
+            UwuAppPolicyManager.migrate(userId, UwuAppPolicyManager.FEATURE_CLIPBOARD, legacy);
+            snapshot = UwuAppPolicyManager.snapshot(userId);
+        }
+        ArrayMap<String, Integer> read = new ArrayMap<>();
+        ArrayMap<String, Integer> write = new ArrayMap<>();
+        for (String name : snapshot.keySet()) {
+            if (UwuAppPolicyManager.MIGRATIONS.equals(name)) continue;
+            int r = UwuAppPolicyManager.policy(snapshot, name, UwuAppPolicyManager.CLIPBOARD_READ);
+            int w = UwuAppPolicyManager.policy(snapshot, name, UwuAppPolicyManager.CLIPBOARD_WRITE);
+            if (r != UwuAppPolicyManager.INHERIT) read.put(name, r);
+            if (w != UwuAppPolicyManager.INHERIT) write.put(name, w);
+        }
+        boolean promptsEnabled = Settings.Secure.getIntForUser(getContext().getContentResolver(),
+                Settings.Secure.UWU_APP_CLIPBOARD_PROMPTS_ENABLED, 0, userId) != 0;
+        synchronized (mLock) {
+            boolean defaultsChanged = mClipboardPromptsEnabled.indexOfKey(userId) < 0
+                    || mClipboardPromptsEnabled.get(userId) != promptsEnabled;
+            boolean readChanged = defaultsChanged || !read.equals(mClipboardReadPolicies.get(userId));
+            boolean writeChanged = defaultsChanged || !write.equals(mClipboardWritePolicies.get(userId));
+            mClipboardReadPolicies.put(userId, read);
+            mClipboardWritePolicies.put(userId, write);
+            mClipboardPromptsEnabled.put(userId, promptsEnabled);
+            if (readChanged) mClipboardAccessState.invalidateDecisions(userId,
+                    ClipboardAccessPromptActivity.OPERATION_READ);
+            if (writeChanged) {
+                mClipboardAccessState.invalidateDecisions(userId,
+                        ClipboardAccessPromptActivity.OPERATION_WRITE);
+                updatePendingClipboardWritePoliciesLocked(userId);
+            }
         }
     }
 
@@ -481,28 +529,21 @@ public class ClipboardService extends SystemService {
         }
 
         final long token = Binder.clearCallingIdentity();
-        final ArrayMap<String, Integer> policies;
-        final boolean saved;
+        boolean saved = false;
         try {
-            policies = parseClipboardAccessPolicies(Settings.Secure.getStringForUser(
-                    getContext().getContentResolver(),
-                    clipboardPolicySetting(appOp), userId));
-            policies.put(packageName, decision);
-            final JSONObject object = new JSONObject();
-            for (int index = 0; index < policies.size(); index++) {
-                object.put(policies.keyAt(index), policies.valueAt(index));
-            }
-            saved = Settings.Secure.putStringForUser(getContext().getContentResolver(),
-                    clipboardPolicySetting(appOp),
-                    policies.isEmpty() ? null : object.toString(), userId);
-        } catch (JSONException impossible) {
-            throw new AssertionError(impossible);
+            UwuAppPolicyManager.setPolicy(packageName, userId,
+                    operation == ClipboardAccessPromptActivity.OPERATION_WRITE
+                            ? UwuAppPolicyManager.CLIPBOARD_WRITE
+                            : UwuAppPolicyManager.CLIPBOARD_READ, decision);
+            reloadUwuClipboardPolicies(userId);
+            saved = true;
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            Slog.w(TAG, "Could not persist clipboard policy", e);
         } finally {
             Binder.restoreCallingIdentity(token);
         }
         if (saved) {
             synchronized (mLock) {
-                clipboardPolicyCache(appOp).remove(userId);
                 if (mClipboardAccessState.isCurrentPrompt(accessKey, promptId,
                         SystemClock.elapsedRealtime())) {
                     mClipboardAccessState.resolvePrompt(accessKey,
@@ -622,20 +663,7 @@ public class ClipboardService extends SystemService {
             final SparseArray<ArrayMap<String, Integer>> policyCache =
                     clipboardPolicyCache(operation);
             ArrayMap<String, Integer> policies = policyCache.get(userId);
-            if (policies == null) {
-                final long token = Binder.clearCallingIdentity();
-                try {
-                    policies = parseClipboardAccessPolicies(Settings.Secure.getStringForUser(
-                            getContext().getContentResolver(),
-                            Settings.Secure.UWU_APP_CLIPBOARD_POLICIES, userId));
-                    policies.putAll(parseClipboardAccessPolicies(
-                            Settings.Secure.getStringForUser(getContext().getContentResolver(),
-                                    clipboardPolicySetting(operation), userId)));
-                } finally {
-                    Binder.restoreCallingIdentity(token);
-                }
-                policyCache.put(userId, policies);
-            }
+            if (policies == null) policies = new ArrayMap<>();
             final Integer explicitPolicy = policies.get(packageName);
             if (explicitPolicy != null) {
                 return explicitPolicy;
