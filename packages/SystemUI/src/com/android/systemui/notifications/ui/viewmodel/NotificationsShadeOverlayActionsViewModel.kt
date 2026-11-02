@@ -57,10 +57,6 @@ constructor(private val shadeModeInteractor: ShadeModeInteractor) : UserActionsV
                             Swipe.Left,
                             ReplaceByOverlay(Overlays.QuickSettingsShade, TransitionKeys.ShadeSwipeLeft),
                         )
-                        put(
-                            Swipe.Right,
-                            ReplaceByOverlay(Overlays.QuickSettingsShade, TransitionKeys.ShadeSwipeRight),
-                        )
                     }
                 }
             )
