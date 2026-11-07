@@ -60,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.Layout
@@ -112,6 +113,7 @@ import com.android.systemui.shade.ui.composable.ShadeHeader.Values.ClockScale
 import com.android.systemui.shade.ui.viewmodel.ShadeHeaderViewModel
 import com.android.systemui.statusbar.phone.StatusBarLocation
 import com.android.systemui.statusbar.phone.domain.interactor.IsAreaDark
+import com.android.systemui.statusbar.pipeline.battery.shared.ui.BatteryColors
 import com.android.systemui.statusbar.pipeline.battery.ui.composable.BatteryWithEstimate
 import com.android.systemui.statusbar.pipeline.mobile.StatusBarMobileIconKairos
 import com.android.systemui.statusbar.pipeline.mobile.ui.MobileViewLogger
@@ -502,6 +504,7 @@ fun ContentScope.OverlayShadeHeader(
                         useExpandedFormat = false,
                         textColor = quickSettingsForeground,
                         chipHighlightModel = quickSettingsHighlight,
+                        chipBackgroundColor = quickSettingsBackground,
                     )
                 }
                 if (!groupedPrivacyChip() && viewModel.isPrivacyChipVisible) {
@@ -717,6 +720,7 @@ private fun BatteryInfo(
     modifier: Modifier = Modifier,
     textColor: Color = MaterialTheme.colorScheme.onSurface,
     chipHighlightModel: ChipHighlightModel? = null,
+    chipBackgroundColor: Color = Color.Transparent,
 ) {
     val isQuickSettingsDarkTheme = isSystemInDarkTheme()
     // `viewModel.isShadeAreaDark` does not account for when the shade is pulled down and scrim is
@@ -730,12 +734,20 @@ private fun BatteryInfo(
             ChipHighlightModel.Strong -> IsAreaDark { !isQuickSettingsDarkTheme }
             ChipHighlightModel.Weak -> IsAreaDark { isQuickSettingsDarkTheme }
         }
+    val glyphColor = chipBackgroundColor.compositeOver(MaterialTheme.colorScheme.surface)
+    val defaultColors =
+        if (chipHighlightModel != null) {
+            remember(textColor, glyphColor) { BatteryColors.ThemedDefault(textColor, glyphColor) }
+        } else {
+            null
+        }
     BatteryWithEstimate(
         viewModelFactory = viewModel.batteryViewModelFactory,
         isDarkProvider = { isDarkProvider },
         showIcon = showIcon,
         showEstimate = useExpandedFormat,
         textColor = textColor,
+        defaultColors = defaultColors,
         modifier = modifier.sysuiResTag(ShadeHeader.TestTags.BatteryTestTag),
     )
 }

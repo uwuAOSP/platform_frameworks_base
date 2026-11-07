@@ -74,7 +74,7 @@ sealed interface ChipHighlightModel {
             @Composable get() = Color.White.copy(alpha = if (isSystemInDarkTheme()) 0.1f else 0.4f)
 
         override val foregroundColor: Color
-            @Composable get() = if (isSystemInDarkTheme()) Color.White else Color.Black
+            @Composable get() = MaterialTheme.colorScheme.onSurface
 
         override val hoverBackgroundColor: Color
             @Composable get() = backgroundColor.copy(alpha = Alpha.DEFAULT_HOVER)
