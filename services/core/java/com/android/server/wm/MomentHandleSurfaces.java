@@ -16,22 +16,17 @@
 
 package com.android.server.wm;
 
-import android.animation.Animator;
-import android.animation.AnimatorListenerAdapter;
-import android.animation.ValueAnimator;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.view.Surface.OutOfResourcesException;
 import android.view.SurfaceControl;
-import android.view.animation.PathInterpolator;
+
+import com.android.internal.dynamicanimation.animation.SpringAnimation;
 
 final class MomentHandleSurfaces {
 
     private static final float PRESSED_WIDTH_SCALE = 76f / 108f;
-    private static final long PRESS_ANIMATION_DURATION_MS = 200;
-    private static final PathInterpolator PRESS_INTERPOLATOR =
-            new PathInterpolator(0f, 0f, 0.2f, 1f);
 
     private final Task mTask;
     private final float[] mBottomColor = new float[3];
@@ -41,7 +36,7 @@ final class MomentHandleSurfaces {
 
     private SurfaceControl mBottomSurface;
     private SurfaceControl mTopSurface;
-    private ValueAnimator mPressAnimator;
+    private SpringAnimation mPressAnimator;
     private float mPressProgress;
     private boolean mDestroyed;
 
@@ -146,35 +141,27 @@ final class MomentHandleSurfaces {
     }
 
     private void startPressAnimation(boolean isTouchDown) {
-        final ValueAnimator previousAnimator;
-        synchronized (this) {
-            previousAnimator = mPressAnimator;
-            mPressAnimator = null;
-        }
-        if (previousAnimator != null) {
-            previousAnimator.cancel();
-        }
-
         synchronized (this) {
             if (mDestroyed || mBottomSurface == null || mBottomBounds.isEmpty()) {
                 return;
             }
             final float targetProgress = isTouchDown ? 1f : 0f;
+            if (mPressAnimator != null && mPressAnimator.isRunning()) {
+                mPressAnimator.animateToFinalPosition(targetProgress);
+                return;
+            }
             if (mPressProgress == targetProgress) {
                 return;
             }
-            final ValueAnimator animator = ValueAnimator.ofFloat(mPressProgress, targetProgress);
+            final SpringAnimation animator = MomentMotion.spring(mPressProgress, targetProgress,
+                    0f, MomentMotion.FAST_SPATIAL, 0.001f);
             mPressAnimator = animator;
-            animator.setDuration(PRESS_ANIMATION_DURATION_MS);
-            animator.setInterpolator(PRESS_INTERPOLATOR);
-            animator.addUpdateListener(animation -> applyPressAnimationFrame(animation));
-            animator.addListener(new AnimatorListenerAdapter() {
-                @Override
-                public void onAnimationEnd(Animator animation) {
-                    synchronized (MomentHandleSurfaces.this) {
-                        if (mPressAnimator == animation) {
-                            mPressAnimator = null;
-                        }
+            animator.addUpdateListener((animation, value, velocity) ->
+                    applyPressAnimationFrame(animator, value));
+            animator.addEndListener((animation, cancelled, value, velocity) -> {
+                synchronized (MomentHandleSurfaces.this) {
+                    if (mPressAnimator == animation) {
+                        mPressAnimator = null;
                     }
                 }
             });
@@ -182,12 +169,12 @@ final class MomentHandleSurfaces {
         }
     }
 
-    private synchronized void applyPressAnimationFrame(ValueAnimator animator) {
+    private synchronized void applyPressAnimationFrame(SpringAnimation animator, float value) {
         if (mPressAnimator != animator || mDestroyed || mBottomSurface == null
                 || !mBottomSurface.isValid() || mBottomBounds.isEmpty()) {
             return;
         }
-        mPressProgress = (float) animator.getAnimatedValue();
+        mPressProgress = value;
         try (SurfaceControl.Transaction t = mTask.mWmService.mTransactionFactory.get()) {
             applyBottomGeometry(t);
             t.apply();
@@ -217,7 +204,7 @@ final class MomentHandleSurfaces {
     }
 
     private void cancelPressAnimationLocked() {
-        final ValueAnimator animator = mPressAnimator;
+        final SpringAnimation animator = mPressAnimator;
         mPressAnimator = null;
         if (animator != null) {
             mTask.mWmService.mAnimationHandler.post(animator::cancel);

@@ -5,9 +5,6 @@
 
 package com.android.server.wm;
 
-import android.animation.Animator;
-import android.animation.AnimatorListenerAdapter;
-import android.animation.ValueAnimator;
 import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
@@ -21,8 +18,8 @@ import android.os.UserHandle;
 import android.util.Slog;
 import android.view.Surface;
 import android.view.SurfaceControl;
-import android.view.animation.PathInterpolator;
 
+import com.android.internal.dynamicanimation.animation.SpringAnimation;
 import com.android.internal.os.BackgroundThread;
 
 /** Task-local launch-style veil. Never captures app content or owns the task transform. */
@@ -39,7 +36,7 @@ final class MomentLayoutSnapshot {
     private float mParentScaleY = 1f;
     private boolean mDestroyed;
     private boolean mRevealing;
-    private ValueAnimator mFade;
+    private SpringAnimation mFade;
     private int mExpectedWindowingMode;
     private int mLayoutGeneration;
     private boolean mArmed;
@@ -223,46 +220,35 @@ final class MomentLayoutSnapshot {
                 if (mFade != null) {
                     mFade.cancel();
                 }
-                final ValueAnimator fade = ValueAnimator.ofFloat(1f, 0f);
+                final SpringAnimation fade = MomentMotion.spring(1f, 0f, 0f,
+                        MomentMotion.FAST_EFFECTS, 0.001f);
                 mFade = fade;
-                fade.setDuration(160);
-                fade.setInterpolator(new PathInterpolator(.4f, 0f, .2f, 1f));
-                fade.addUpdateListener(animation -> {
+                fade.addUpdateListener((animation, value, velocity) -> {
                     synchronized (this) {
                         if (isValid() && generation == mLayoutGeneration) {
                             try (SurfaceControl.Transaction t =
                                     mTask.mWmService.mTransactionFactory.get()) {
-                                t.setAlpha(mBackground, (float) animation.getAnimatedValue()).apply();
+                                t.setAlpha(mBackground, MomentMotion.clamp(value)).apply();
                             }
                         }
                     }
                 });
-                fade.addListener(new AnimatorListenerAdapter() {
-                    private boolean mCancelled;
-
-                    @Override
-                    public void onAnimationCancel(Animator animation) {
-                        mCancelled = true;
+                fade.addEndListener((animation, cancelled, value, velocity) -> {
+                    synchronized (MomentLayoutSnapshot.this) {
+                        if (mFade == animation) {
+                            mFade = null;
+                        }
+                        if (cancelled || mDestroyed || generation != mLayoutGeneration) {
+                            return;
+                        }
                     }
-
-                    @Override
-                    public void onAnimationEnd(Animator animation) {
-                        synchronized (MomentLayoutSnapshot.this) {
-                            if (mFade == animation) {
-                                mFade = null;
-                            }
-                            if (mCancelled || mDestroyed || generation != mLayoutGeneration) {
-                                return;
+                    mTask.mWmService.mH.post(() -> {
+                        synchronized (mTask.mWmService.mGlobalLock) {
+                            if (generation == getLayoutGeneration()) {
+                                onFinished.run();
                             }
                         }
-                        mTask.mWmService.mH.post(() -> {
-                            synchronized (mTask.mWmService.mGlobalLock) {
-                                if (generation == getLayoutGeneration()) {
-                                    onFinished.run();
-                                }
-                            }
-                        });
-                    }
+                    });
                 });
                 fade.start();
             }

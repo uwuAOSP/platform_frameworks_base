@@ -58,7 +58,7 @@ final class MomentHandleWindow {
     private static final float COMPACT_FLING_UNSTUCK_MIN_VELOCITY = 4000f;
     private static final float COMPACT_STASH_VELOCITY_THRESHOLD = 18000f;
     private static final int COMPACT_STASH_OFFSET_DP = 32;
-    private static final float COMPACT_MAGNET_STIFFNESS = SpringForce.STIFFNESS_MEDIUM;
+    private static final float COMPACT_MAGNET_STIFFNESS = MomentMotion.DEFAULT_SPATIAL.stiffness;
     private static final float COMPACT_CATCH_UP_STIFFNESS = 5000f;
     private static final float COMPACT_NO_BOUNCE = SpringForce.DAMPING_RATIO_NO_BOUNCY;
 
@@ -818,7 +818,7 @@ final class MomentHandleWindow {
                 mCompactMotion.springTo(dismissWindow.getTargetCenterX(),
                         dismissWindow.getTargetCenterY(), 1f, mCompactVelocityX,
                         mCompactVelocityY,
-                        COMPACT_MAGNET_STIFFNESS, COMPACT_NO_BOUNCE, null);
+                        COMPACT_MAGNET_STIFFNESS, MomentMotion.DEFAULT_SPATIAL.damping, null);
             } else if (mCompactMagnetized && !inMagneticTarget) {
                 mCompactMagnetized = false;
                 vibrate(VibrationEffect.EFFECT_TICK);

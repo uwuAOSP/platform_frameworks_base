@@ -42,8 +42,6 @@ import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import android.view.Surface;
 import android.view.SurfaceControl;
-import android.view.animation.Interpolator;
-import android.view.animation.PathInterpolator;
 
 import com.android.internal.policy.ScreenDecorationsUtils;
 
@@ -63,20 +61,11 @@ final class MomentController {
     private static final float COMPACT_EPSILON = 0.001f;
     private static final float COMPACT_DISMISS_SCALE = 0.85f;
     private static final int MOVEMENT_SAFE_MARGIN_DP = 5;
-    private static final long EXPAND_ANIMATION_DURATION_MS = 350;
-    private static final long RESTORE_ANIMATION_DURATION_MS = 300;
-    private static final long ENTER_COMPACT_ANIMATION_DURATION_MS = 220;
-    private static final long OPEN_ANIMATION_DURATION_MS = 240;
     private static final long OPEN_REVEAL_TIMEOUT_MS = 3000;
-    private static final long CLOSE_ANIMATION_DURATION_MS = 300;
     private static final int ANIMATION_EXPAND_FULLSCREEN = 1;
     private static final int ANIMATION_RESTORE_COMPACT = 2;
     private static final int ANIMATION_ENTER_COMPACT = 3;
     private static final int ANIMATION_CONVERT_FULLSCREEN = 4;
-    private static final PathInterpolator TASK_TRANSFORM_INTERPOLATOR =
-            new PathInterpolator(0.2f, 0f, 0f, 1f);
-    private static final Interpolator TASK_TRANSFORM_REVERSE_INTERPOLATOR = input ->
-            1f - TASK_TRANSFORM_INTERPOLATOR.getInterpolation(1f - input);
 
     private final WindowManagerService mService;
     private final ArrayMap<Integer, MomentTaskSurfaceState> mStates = new ArrayMap<>();
@@ -382,8 +371,7 @@ final class MomentController {
                     targetBounds.exactCenterY(), 1f,
                     MomentGeometry.getCornerRadius(getDensityLocked(rootTask)) * state.getScale(),
                     1f,
-                    EXPAND_ANIMATION_DURATION_MS,
-                    ANIMATION_CONVERT_FULLSCREEN, TASK_TRANSFORM_REVERSE_INTERPOLATOR);
+                    MomentMotion.SLOW_SPATIAL, ANIMATION_CONVERT_FULLSCREEN);
             return rootTask.mTaskId;
         }
     }
@@ -644,7 +632,7 @@ final class MomentController {
                     bounds.exactCenterY(), 1f,
                     MomentGeometry.getCornerRadius(getDensityLocked(task)) * endScale,
                     1f,
-                    ENTER_COMPACT_ANIMATION_DURATION_MS,
+                    MomentMotion.DEFAULT_SPATIAL,
                     ANIMATION_ENTER_COMPACT);
         }
     }
@@ -767,7 +755,7 @@ final class MomentController {
                     bounds.exactCenterX(), bounds.exactCenterY(), 1f,
                     MomentGeometry.getCornerRadius(getDensityLocked(task)) * endScale,
                     1f,
-                    RESTORE_ANIMATION_DURATION_MS, ANIMATION_RESTORE_COMPACT);
+                    MomentMotion.DEFAULT_SPATIAL, ANIMATION_RESTORE_COMPACT);
         }
     }
 
@@ -793,7 +781,7 @@ final class MomentController {
                     fullscreenBounds.exactCenterX(), fullscreenBounds.exactCenterY(), 1f,
                     getDisplayCornerRadiusLocked(task),
                     0f,
-                    EXPAND_ANIMATION_DURATION_MS, ANIMATION_EXPAND_FULLSCREEN);
+                    MomentMotion.SLOW_SPATIAL, ANIMATION_EXPAND_FULLSCREEN);
         }
     }
 
@@ -1066,10 +1054,10 @@ final class MomentController {
         scheduleMomentSurfaceUpdateLocked(task);
 
         final MomentGeometry.MorphFrame frame = new MomentGeometry.MorphFrame();
-        mAnimationRunner.start(state, CLOSE_ANIMATION_DURATION_MS, null,
-                () -> state.isCloseAnimation(generation), progress -> {
+        mAnimationRunner.start(state, MomentMotion.EXIT_SPATIAL,
+                () -> state.isCloseAnimation(generation), (spatial, effects) -> {
                 MomentGeometry.evaluateCloseMorph(startBounds, taskScale, density,
-                        progress, frame);
+                        MomentMotion.clamp(spatial), effects, frame);
                 try (SurfaceControl.Transaction t = mService.mTransactionFactory.get()) {
                     if (state.applyCloseAnimationFrame(t, generation, frame.centerX, frame.centerY,
                             frame.width, frame.height, frame.cornerRadius, frame.alpha)) {
@@ -1089,7 +1077,7 @@ final class MomentController {
         final float taskScale = state.getScale();
         final float density = getDensityLocked(task);
         final MomentGeometry.MorphFrame initialFrame = new MomentGeometry.MorphFrame();
-        MomentGeometry.evaluateCloseMorph(endBounds, taskScale, density, 1f, initialFrame);
+        MomentGeometry.evaluateOpenMorph(endBounds, taskScale, density, 0f, 0f, initialFrame);
         final int color = mService.mContext.getColor(android.R.color.system_accent1_100);
         final int generation = state.beginOpenAnimation(startTransaction, color,
                 initialFrame.centerX, initialFrame.centerY, initialFrame.width,
@@ -1109,11 +1097,10 @@ final class MomentController {
     private void startMomentOpenAnimator(int taskId, MomentTaskSurfaceState state, int generation,
             Rect endBounds, float taskScale, float density) {
         final MomentGeometry.MorphFrame frame = new MomentGeometry.MorphFrame();
-        mAnimationRunner.start(state, OPEN_ANIMATION_DURATION_MS, null,
-                () -> state.isOpenAnimation(generation), progress -> {
-            final float reverseProgress = 1f - progress;
-            MomentGeometry.evaluateCloseMorph(endBounds, taskScale, density,
-                    reverseProgress, frame);
+        mAnimationRunner.start(state, MomentMotion.DEFAULT_SPATIAL,
+                () -> state.isOpenAnimation(generation), (spatial, effects) -> {
+            MomentGeometry.evaluateOpenMorph(endBounds, taskScale, density,
+                    spatial, effects, frame);
             try (SurfaceControl.Transaction t = mService.mTransactionFactory.get()) {
                 if (state.applyOpenAnimationFrame(t, generation, frame.centerX, frame.centerY,
                         frame.width, frame.height, frame.cornerRadius, frame.alpha)) {
@@ -1182,28 +1169,30 @@ final class MomentController {
 
     private void startTaskTransformAnimationLocked(Task task, MomentTaskSurfaceState state,
             float endScale, float endCenterX, float endCenterY, float endAlpha,
-            float endDisplayedCornerRadius, float endCropProgress, long duration, int endAction) {
+            float endDisplayedCornerRadius, float endCropProgress, MomentMotion.Spec spatialSpec,
+            int endAction) {
         startTaskTransformAnimationLocked(task, state, endScale, endScale, endCenterX, endCenterY,
-                endAlpha, endDisplayedCornerRadius, endCropProgress, duration, endAction);
+                endAlpha, endDisplayedCornerRadius, endCropProgress, spatialSpec, endAction);
     }
 
     private void startTaskTransformAnimationLocked(Task task, MomentTaskSurfaceState state,
             float endScaleX, float endScaleY, float endCenterX, float endCenterY, float endAlpha,
-            float endDisplayedCornerRadius, float endCropProgress, long duration, int endAction) {
+            float endDisplayedCornerRadius, float endCropProgress, MomentMotion.Spec spatialSpec,
+            int endAction) {
         final Rect startBounds = state.getSurfaceBounds();
         final float startScale = state.getScale();
         startTaskTransformAnimationFromLocked(task, state, startScale, startScale,
                 startBounds.exactCenterX(), startBounds.exactCenterY(), 1f,
                 state.getDisplayedCornerRadius(), endScaleX, endScaleY, endCenterX, endCenterY,
                 endAlpha, endDisplayedCornerRadius, endCropProgress,
-                duration, endAction, TASK_TRANSFORM_INTERPOLATOR);
+                spatialSpec, endAction);
     }
 
     private void startTaskTransformAnimationFromLocked(Task task, MomentTaskSurfaceState state,
             float startScaleX, float startScaleY, float startCenterX, float startCenterY,
             float startAlpha, float startDisplayedCornerRadius, float endScaleX, float endScaleY,
             float endCenterX, float endCenterY, float endAlpha, float endDisplayedCornerRadius,
-            float endCropProgress, long duration, int endAction, Interpolator interpolator) {
+            float endCropProgress, MomentMotion.Spec spatialSpec, int endAction) {
         final float startCropProgress = endAction == ANIMATION_CONVERT_FULLSCREEN ? 0f : 1f;
         final int generation = state.beginTransformAnimation(startScaleX, startScaleY,
                 startCenterX, startCenterY, startAlpha, startDisplayedCornerRadius,
@@ -1216,21 +1205,53 @@ final class MomentController {
         }
         scheduleMomentSurfaceUpdateLocked(task);
 
-        mAnimationRunner.start(state, duration, interpolator,
-                () -> state.isTransformAnimation(generation), progress -> {
-                final float scaleX = lerp(startScaleX, endScaleX, progress);
-                final float scaleY = lerp(startScaleY, endScaleY, progress);
-                final float centerX = lerp(startCenterX, endCenterX, progress);
-                final float centerY = lerp(startCenterY, endCenterY, progress);
-                final float alpha = lerp(startAlpha, endAlpha, progress);
+        final Rect baseBounds = new Rect(task.getBounds());
+        final Rect contentCrop = state.getContentCrop();
+        final Rect envelope = new Rect(task.getDisplayContent().getBounds());
+        // Preserve an intentionally stashed source or destination, but do not let spring
+        // overshoot push an otherwise visible task off the physical display.
+        envelope.union(Math.round(startCenterX - baseBounds.width() * startScaleX / 2f),
+                Math.round(startCenterY - baseBounds.height() * startScaleY / 2f),
+                Math.round(startCenterX + baseBounds.width() * startScaleX / 2f),
+                Math.round(startCenterY + baseBounds.height() * startScaleY / 2f));
+        final boolean[] settlingPosted = {false};
+        mAnimationRunner.start(state, spatialSpec,
+                () -> state.isTransformAnimation(generation), (progress, effects) -> {
+                final float cropProgress = lerp(startCropProgress, endCropProgress, effects);
+                final float cropWidth = lerp(baseBounds.width(), contentCrop.width(), cropProgress);
+                final float cropHeight = lerp(baseBounds.height(), contentCrop.height(), cropProgress);
+                final float rawScaleX = Math.max(0.001f, lerp(startScaleX, endScaleX, progress));
+                final float rawScaleY = Math.max(0.001f, lerp(startScaleY, endScaleY, progress));
+                final float fit = Math.min(1f, Math.min(envelope.width() / (cropWidth * rawScaleX),
+                        envelope.height() / (cropHeight * rawScaleY)));
+                final float scaleX = rawScaleX * fit;
+                final float scaleY = rawScaleY * fit;
+                final float halfWidth = cropWidth * scaleX / 2f;
+                final float halfHeight = cropHeight * scaleY / 2f;
+                final float centerX = clampToRange(lerp(startCenterX, endCenterX, progress),
+                        envelope.left + halfWidth, envelope.right - halfWidth);
+                final float centerY = clampToRange(lerp(startCenterY, endCenterY, progress),
+                        envelope.top + halfHeight, envelope.bottom - halfHeight);
+                final float alpha = MomentMotion.clamp(lerp(startAlpha, endAlpha, effects));
                 final float displayedCornerRadius = lerp(startDisplayedCornerRadius,
-                        endDisplayedCornerRadius, progress);
-                final float cropProgress = lerp(startCropProgress, endCropProgress, progress);
+                        endDisplayedCornerRadius, MomentMotion.clamp(progress));
                 try (SurfaceControl.Transaction t = mService.mTransactionFactory.get()) {
                     if (state.applyAnimatedTransform(t, generation, scaleX, scaleY, centerX, centerY,
                             alpha, displayedCornerRadius, cropProgress)) {
                         t.apply();
                     }
+                }
+                if (endAction == ANIMATION_CONVERT_FULLSCREEN && progress >= 0.95f
+                        && !settlingPosted[0]) {
+                    settlingPosted[0] = true;
+                    mService.mH.post(() -> {
+                        synchronized (mService.mGlobalLock) {
+                            if (getStateLocked(task) == state
+                                    && state.isTransformAnimation(generation)) {
+                                finishLayoutSnapshotAnimationLocked(task);
+                            }
+                        }
+                    });
                 }
                 }, () -> mService.mH.post(() -> onTaskTransformAnimationFinished(task.mTaskId,
                         state, generation, endScaleX, endCenterX, endCenterY, endAction)));
