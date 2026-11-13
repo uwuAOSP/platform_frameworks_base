@@ -13,10 +13,12 @@ import android.content.pm.Signature;
 import android.hardware.security.keymint.Algorithm;
 import android.hardware.security.keymint.EcCurve;
 import android.hardware.security.keymint.KeyParameter;
+import android.hardware.security.keymint.KeyPurpose;
 import android.hardware.security.keymint.Tag;
 import com.android.internal.security.keybox.KeyboxKeyParameters;
 import android.os.Binder;
 import android.os.Build;
+import android.os.SystemProperties;
 import android.security.keystore.KeyProperties;
 import android.system.keystore2.KeyDescriptor;
 import android.util.Log;
@@ -61,6 +63,8 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.security.spec.ECGenParameterSpec;
 import java.security.spec.RSAKeyGenParameterSpec;
+import java.time.DateTimeException;
+import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Date;
@@ -83,6 +87,9 @@ public final class KeyboxChainGenerator {
     private static final int ATTESTATION_APPLICATION_ID_SIGNATURE_DIGESTS_INDEX = 1;
     private static final int ATTESTATION_PACKAGE_INFO_PACKAGE_NAME_INDEX = 0;
     private static final int ATTESTATION_PACKAGE_INFO_VERSION_INDEX = 1;
+    // Preserve the legacy April 2024 fallback while keeping field widths valid.
+    private static final int FALLBACK_OS_PATCH_LEVEL = 202404;
+    private static final int FALLBACK_COMPONENT_PATCH_LEVEL = 20240401;
 
     public static List<Certificate> generateCertChain(int uid, KeyDescriptor descriptor,
             KeyGenParameters params, byte[] entropy) {
@@ -157,8 +164,15 @@ public final class KeyboxChainGenerator {
                 SubjectPublicKeyInfo.getInstance(ASN1Sequence.getInstance(publicKey.getEncoded()))
         );
 
-        KeyUsage keyUsage = new KeyUsage(KeyUsage.keyCertSign);
-        certBuilder.addExtension(Extension.keyUsage, true, keyUsage);
+        // An application attestation key signs certificates rather than application data.
+        if (params.purpose.contains(KeyPurpose.ATTEST_KEY)) {
+            certBuilder.addExtension(Extension.basicConstraints, true,
+                    new com.android.internal.org.bouncycastle.asn1.x509.BasicConstraints(true));
+        }
+        KeyUsage keyUsage = createKeyUsage(params.purpose);
+        if (keyUsage != null) {
+            certBuilder.addExtension(Extension.keyUsage, true, keyUsage);
+        }
         certBuilder.addExtension(createExtension(params, uid));
 
         ContentSigner contentSigner;
@@ -174,6 +188,34 @@ public final class KeyboxChainGenerator {
         List<Certificate> chain = KeyboxUtils.getCertificateChain(leaf.getPublicKey().getAlgorithm());
         chain.add(0, leaf);
         return chain;
+    }
+
+    @Nullable
+    private static KeyUsage createKeyUsage(List<Integer> purposes) {
+        int usages = 0;
+        for (int purpose : purposes) {
+            switch (purpose) {
+                case KeyPurpose.SIGN:
+                case KeyPurpose.VERIFY:
+                    usages |= KeyUsage.digitalSignature;
+                    break;
+                case KeyPurpose.ENCRYPT:
+                case KeyPurpose.DECRYPT:
+                    usages |= KeyUsage.keyEncipherment;
+                    break;
+                case KeyPurpose.AGREE_KEY:
+                    usages |= KeyUsage.keyAgreement;
+                    break;
+                case KeyPurpose.ATTEST_KEY:
+                    usages |= KeyUsage.keyCertSign;
+                    break;
+                default:
+                    // Other purposes have no generic leaf-certificate mapping here.
+                    dlog("No X.509 Key Usage mapping for KeyMint purpose " + purpose);
+                    break;
+            }
+        }
+        return usages == 0 ? null : new KeyUsage(usages);
     }
 
     private static ASN1Encodable[] fromIntList(List<Integer> list) {
@@ -203,11 +245,11 @@ public final class KeyboxChainGenerator {
 
             // To be loaded
             var AosVersion = new ASN1Integer(getOsVersion());
-            var AosPatchLevel = new ASN1Integer(getPatchLevel());
+            var AosPatchLevel = new ASN1Integer(getSystemPatchLevel());
 
             var AapplicationID = createApplicationId(uid);
-            var AbootPatchlevel = new ASN1Integer(getPatchLevelLong());
-            var AvendorPatchLevel = new ASN1Integer(getPatchLevelLong());
+            int bootPatchLevel = getBootPatchLevel();
+            var AvendorPatchLevel = new ASN1Integer(getVendorPatchLevel());
 
             var AcreationDateTime = new ASN1Integer(System.currentTimeMillis());
             var Aorigin = new ASN1Integer(0);
@@ -225,9 +267,12 @@ public final class KeyboxChainGenerator {
             var osPatchLevel = new DERTaggedObject(true, 706, AosPatchLevel);
             var applicationID = new DERTaggedObject(true, 709, AapplicationID);
             var vendorPatchLevel = new DERTaggedObject(true, 718, AvendorPatchLevel);
-            var bootPatchLevel = new DERTaggedObject(true, 719, AbootPatchlevel);
+            var bootPatchLevelTag = new DERTaggedObject(true, 719,
+                    new ASN1Integer(bootPatchLevel));
 
-            ASN1Encodable[] teeEnforcedEncodables;
+            List<ASN1Encodable> teeEnforcedEncodables = new ArrayList<>(Arrays.asList(
+                    purpose, algorithm, keySize, digest, ecCurve, noAuthRequired, origin,
+                    rootOfTrust, osVersion, osPatchLevel, vendorPatchLevel, bootPatchLevelTag));
 
             // Support device properties attestation
             if (params.brand != null) {
@@ -242,18 +287,14 @@ public final class KeyboxChainGenerator {
                 var manufacturer = new DERTaggedObject(true, 716, Amanufacturer);
                 var model = new DERTaggedObject(true, 717, Amodel);
 
-                teeEnforcedEncodables = new ASN1Encodable[]{purpose, algorithm, keySize, digest, ecCurve,
-                        noAuthRequired, origin, rootOfTrust, osVersion, osPatchLevel, vendorPatchLevel,
-                        bootPatchLevel, brand, device, product, manufacturer, model};
-            } else {
-                teeEnforcedEncodables = new ASN1Encodable[]{purpose, algorithm, keySize, digest, ecCurve,
-                        noAuthRequired, origin, rootOfTrust, osVersion, osPatchLevel, vendorPatchLevel,
-                        bootPatchLevel};
+                teeEnforcedEncodables.addAll(Arrays.asList(
+                        brand, device, product, manufacturer, model));
             }
 
             ASN1Encodable[] softwareEnforced = {applicationID, creationDateTime};
 
-            ASN1OctetString keyDescriptionOctetStr = getAsn1OctetString(teeEnforcedEncodables, softwareEnforced, params);
+            ASN1OctetString keyDescriptionOctetStr = getAsn1OctetString(
+                    teeEnforcedEncodables.toArray(new ASN1Encodable[0]), softwareEnforced, params);
 
             return new Extension(new ASN1ObjectIdentifier("1.3.6.1.4.1.11129.2.1.17"), false, keyDescriptionOctetStr);
         } catch (Throwable t) {
@@ -274,28 +315,44 @@ public final class KeyboxChainGenerator {
         return major * 10000 + minor * 100 + patch;
     }
 
-    private static int getPatchLevel() {
-        return convertPatchLevel(Build.VERSION.SECURITY_PATCH, false);
+    private static int getSystemPatchLevel() {
+        return convertPatchLevel(Build.VERSION.SECURITY_PATCH, false, "system");
     }
 
-    private static int getPatchLevelLong() {
-        return convertPatchLevel(Build.VERSION.SECURITY_PATCH, true);
+    private static int getVendorPatchLevel() {
+        return convertPatchLevel(SystemProperties.get("ro.vendor.build.security_patch"),
+                true, "vendor");
     }
 
-    private static int convertPatchLevel(String patchLevel, boolean longFormat) {
+    private static int getBootPatchLevel() {
+        String patchLevel = SystemProperties.get("ro.bootimage.build.version.security_patch");
+        if (patchLevel.isEmpty()) {
+            Log.w(TAG, "Boot SPL unavailable; using fallback bootPatchLevel");
+            return FALLBACK_COMPONENT_PATCH_LEVEL;
+        }
+        return convertPatchLevel(patchLevel, true, "boot");
+    }
+
+    private static int convertPatchLevel(String patchLevel, boolean includeDay, String source) {
         try {
-            String[] parts = patchLevel.split("-");
+            String[] parts = patchLevel.split("-", -1);
+            if (parts.length != 3 || parts[0].length() != 4 || parts[1].length() != 2
+                    || parts[2].length() != 2) {
+                throw new IllegalArgumentException("expected YYYY-MM-DD");
+            }
             int year = Integer.parseInt(parts[0]);
             int month = Integer.parseInt(parts[1]);
-            if (longFormat) {
-                int day = Integer.parseInt(parts[2]);
+            int day = Integer.parseInt(parts[2]);
+            LocalDate.of(year, month, day);
+            if (includeDay) {
                 return year * 10000 + month * 100 + day;
-            } else {
-                return year * 100 + month;
             }
-        } catch (Exception e) {
-            Log.e(TAG, "Invalid patch level: " + patchLevel, e);
-            return 202404;
+            return year * 100 + month;
+        } catch (DateTimeException | IllegalArgumentException e) {
+            int fallback = includeDay ? FALLBACK_COMPONENT_PATCH_LEVEL : FALLBACK_OS_PATCH_LEVEL;
+            Log.w(TAG, "Invalid " + source + " security patch level: " + patchLevel
+                    + "; using fallback " + fallback, e);
+            return fallback;
         }
     }
 

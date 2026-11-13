@@ -186,6 +186,11 @@ public final class AttestationService extends SystemService {
     }
 
     private static class KeyboxAttestationServiceImpl extends IKeyboxAttestationService.Stub {
+        private static final int MAX_KEYBOX_ALIAS_UTF16_CODE_UNITS = 1024;
+        private static final int MAX_KEYBOX_BLOB_SIZE_BYTES = 32 * 1024;
+        private static final int MAX_KEYBOX_INT_ARRAY_ITEMS = 1024;
+        private static final long MAX_KEYBOX_REQUEST_SIZE_BYTES = 64 * 1024;
+
         private final Context mContext;
 
         KeyboxAttestationServiceImpl(Context context) {
@@ -217,6 +222,41 @@ public final class AttestationService extends SystemService {
             if (callingUid != Process.KEYSTORE_UID) {
                 throw new SecurityException("Only Keystore daemon can call this service");
             }
+        }
+
+        private static boolean isBlobWithinLimit(byte[] value) {
+            return value == null || value.length <= MAX_KEYBOX_BLOB_SIZE_BYTES;
+        }
+
+        private static boolean isKeyboxRequestWithinLimits(String alias,
+                KeyboxKeyParameters params, byte[] payload) {
+            if (params == null || !isBlobWithinLimit(payload)
+                    || !isBlobWithinLimit(params.certificateSerial)
+                    || !isBlobWithinLimit(params.certificateSubject)
+                    || !isBlobWithinLimit(params.attestationChallenge)
+                    || !isBlobWithinLimit(params.brand) || !isBlobWithinLimit(params.device)
+                    || !isBlobWithinLimit(params.product)
+                    || !isBlobWithinLimit(params.manufacturer)
+                    || !isBlobWithinLimit(params.model)) return false;
+            int aliasLength = alias == null ? 0 : alias.length();
+            int curveNameLength = params.ecCurveName == null ? 0 : params.ecCurveName.length();
+            if (aliasLength > MAX_KEYBOX_ALIAS_UTF16_CODE_UNITS
+                    || curveNameLength > MAX_KEYBOX_ALIAS_UTF16_CODE_UNITS
+                    || (params.purpose != null && params.purpose.length > MAX_KEYBOX_INT_ARRAY_ITEMS)
+                    || (params.digest != null && params.digest.length > MAX_KEYBOX_INT_ARRAY_ITEMS)) {
+                return false;
+            }
+            long requestSize = ((long) aliasLength + curveNameLength) * Character.BYTES;
+            requestSize += (long) (params.purpose == null ? 0 : params.purpose.length) * Integer.BYTES;
+            requestSize += (long) (params.digest == null ? 0 : params.digest.length) * Integer.BYTES;
+            byte[][] blobs = {params.certificateSerial, params.certificateSubject,
+                    params.attestationChallenge, params.brand, params.device, params.product,
+                    params.manufacturer, params.model, payload};
+            for (byte[] blob : blobs) {
+                requestSize += blob == null ? 0 : blob.length;
+                if (requestSize > MAX_KEYBOX_REQUEST_SIZE_BYTES) return false;
+            }
+            return requestSize <= MAX_KEYBOX_REQUEST_SIZE_BYTES;
         }
 
         private static KeyDescriptor buildDescriptor(String alias, int domain, long nspace) {
@@ -253,6 +293,10 @@ public final class AttestationService extends SystemService {
                 int domain, long nspace,
                 KeyboxKeyParameters params, byte[] leafCertificate) {
             enforcePermission();
+            if (!isKeyboxRequestWithinLimits(alias, params, leafCertificate)) {
+                Log.w(TAG, "Rejected oversized Keybox certificate-chain request");
+                return emptyCertificates();
+            }
             try {
                 KeyGenParameters keyGenParams = new KeyGenParameters(params);
                 KeyDescriptor descriptor = buildDescriptor(alias, domain, nspace);
@@ -274,6 +318,10 @@ public final class AttestationService extends SystemService {
         public AttestationCertificates generateSoftwareKey(int targetUid, String alias,
                 int domain, long nspace, KeyboxKeyParameters params, byte[] entropy) {
             enforcePermission();
+            if (!isKeyboxRequestWithinLimits(alias, params, entropy)) {
+                Log.w(TAG, "Rejected oversized Keybox software-key request");
+                return emptyCertificates();
+            }
             try {
                 KeyGenParameters keyGenParams = new KeyGenParameters(params);
                 KeyDescriptor descriptor = buildDescriptor(alias, domain, nspace);
