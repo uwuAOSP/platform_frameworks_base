@@ -18,6 +18,7 @@ package com.android.server.wm;
 
 import static android.view.WindowInsets.Type.systemBars;
 
+import android.content.res.Configuration;
 import android.graphics.Insets;
 import android.graphics.Point;
 import android.graphics.Rect;
@@ -63,6 +64,12 @@ final class MomentTaskSurfaceState {
     private int mAnimationGeneration;
     private boolean mLandscapeLayout;
     private float mScaleBeforeLandscape;
+    private boolean mFixedAspectRatio;
+    private volatile MomentLayoutSnapshot mLayoutSnapshot;
+    private final Rect mFixedLayoutDisplayBounds = new Rect();
+    private final Rect mFixedLayoutBounds = new Rect();
+    private final InsetsState mFixedLayoutInsets = new InsetsState();
+    private int mFixedLayoutRotation = -1;
 
     MomentTaskSurfaceState(Task task, float scale) {
         mTask = task;
@@ -96,10 +103,68 @@ final class MomentTaskSurfaceState {
         return mScale;
     }
 
-    void prepareForFullscreenConversion() {
-        mPreserveTaskBounds = true;
-        mSuppressConversionRelaunch = true;
+    void prepareForFullscreenConversion(boolean fixedAspectRatio) {
+        mPreserveTaskBounds = !fixedAspectRatio;
+        mSuppressConversionRelaunch = !fixedAspectRatio;
         mApplied = true;
+    }
+
+    boolean hasFixedAspectRatio() {
+        return mFixedAspectRatio;
+    }
+
+    void setFixedAspectRatio(boolean fixed) {
+        mFixedAspectRatio = fixed;
+        mPreserveTaskBounds = false;
+    }
+
+    void setLayoutSnapshot(MomentLayoutSnapshot snapshot) {
+        mLayoutSnapshot = snapshot;
+    }
+
+    Rect getContentCrop() {
+        updateBounds();
+        return new Rect(mContentCrop);
+    }
+
+    Rect getFixedAspectRatioBounds(DisplayContent displayContent) {
+        final ActivityRecord activity = mTask.topRunningActivity();
+        final boolean landscape = activity != null
+                && activity.getRequestedConfigurationOrientation()
+                        == Configuration.ORIENTATION_LANDSCAPE;
+        final Rect displayBounds = displayContent.getBounds();
+        final int shortEdge = Math.min(displayBounds.width(), displayBounds.height());
+        final int rotation = landscape
+                ? displayContent.getDisplayRotation().getLandscapeRotation()
+                : displayContent.getDisplayRotation().getPortraitRotation();
+        final InsetsState rawInsets = displayContent.getInsetsStateController().getRawInsetsState();
+        if (mFixedLayoutRotation == rotation && mFixedLayoutDisplayBounds.equals(displayBounds)
+                && mFixedLayoutInsets.equals(rawInsets)) {
+            return new Rect(mFixedLayoutBounds);
+        }
+        final DisplayFrames frames = new DisplayFrames();
+        displayContent.updateDisplayFrames(frames, rotation,
+                landscape ? Math.round(shortEdge * 16f / 9f) : shortEdge,
+                landscape ? shortEdge : Math.round(shortEdge * 16f / 9f));
+        displayContent.getDisplayPolicy().simulateLayoutDisplay(frames);
+        final Rect frame = frames.mInsetsState.getDisplayFrame();
+        final Insets bars = frames.mInsetsState.calculateInsets(frame, frame,
+                systemBars(), true /* ignoreVisibility */);
+        // Reserve system-bar insets outside the fixed-ratio content. The existing crop then
+        // produces an actual 16:9 (or 9:16) visible app surface, not a shortened 16:9 task.
+        if (landscape) {
+            final int contentHeight = Math.max(1, shortEdge - bars.top - bars.bottom);
+            mFixedLayoutBounds.set(0, 0, Math.round(contentHeight * 16f / 9f)
+                    + bars.left + bars.right, shortEdge);
+        } else {
+            final int contentWidth = Math.max(1, shortEdge - bars.left - bars.right);
+            mFixedLayoutBounds.set(0, 0, shortEdge,
+                    Math.round(contentWidth * 16f / 9f) + bars.top + bars.bottom);
+        }
+        mFixedLayoutDisplayBounds.set(displayBounds);
+        mFixedLayoutInsets.set(rawInsets, true /* copySources */);
+        mFixedLayoutRotation = rotation;
+        return new Rect(mFixedLayoutBounds);
     }
 
     boolean shouldPreserveTaskBounds() {
@@ -283,11 +348,14 @@ final class MomentTaskSurfaceState {
         final DisplayContent displayContent = mTask.getDisplayContent();
         final Rect taskBounds = mTask.getBounds();
         if (displayContent == null || taskBounds.isEmpty()
-                || displayContent.getBounds().width() <= displayContent.getBounds().height()
-                || taskBounds.width() >= taskBounds.height()) {
+                || (!mFixedAspectRatio
+                        && (displayContent.getBounds().width() <= displayContent.getBounds().height()
+                                || taskBounds.width() >= taskBounds.height()))) {
             return null;
         }
-        final int rotation = displayContent.getDisplayRotation().getPortraitRotation();
+        final int rotation = taskBounds.width() > taskBounds.height()
+                ? displayContent.getDisplayRotation().getLandscapeRotation()
+                : displayContent.getDisplayRotation().getPortraitRotation();
         final InsetsState rawInsetsState = displayContent.getInsetsStateController()
                 .getRawInsetsState();
         if (mPortraitDisplayFrames.mRotation != rotation
@@ -520,6 +588,10 @@ final class MomentTaskSurfaceState {
                 .setScale(mTask.mSurfaceControl, scaleX, scaleY)
                 .setAlpha(mTask.mSurfaceControl, mTransformAnimating ? mAnimatedAlpha : 1f)
                 .show(mTask.mSurfaceControl);
+        final MomentLayoutSnapshot snapshot = mLayoutSnapshot;
+        if (snapshot != null) {
+            snapshot.applyBounds(t, mAnimatedCrop, scaleX, scaleY);
+        }
     }
 
     boolean hasApplied() {

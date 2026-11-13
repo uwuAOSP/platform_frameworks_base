@@ -850,6 +850,8 @@ public class WindowManagerService extends IWindowManager.Stub
                 Settings.Secure.ACCESSIBILITY_MAGNIFICATION_MAGNIFY_NAV_AND_IME);
         private final Uri mMomentEnabledUri =
                 Settings.Secure.getUriFor(Settings.Secure.MOMENT_ENABLED);
+        private final Uri mMomentFixedAspectRatioUri =
+                Settings.Secure.getUriFor(Settings.Secure.MOMENT_FIXED_ASPECT_RATIO);
         private final Uri mPolicyControlUri =
                 Settings.Global.getUriFor(Settings.Global.POLICY_CONTROL);
         private final Uri mForceDesktopModeOnExternalDisplaysUri = Settings.Global.getUriFor(
@@ -889,6 +891,8 @@ public class WindowManagerService extends IWindowManager.Stub
             resolver.registerContentObserver(mMagnifyImeEnabledUri, false, this,
                     UserHandle.USER_ALL);
             resolver.registerContentObserver(mMomentEnabledUri, false, this,
+                    UserHandle.USER_ALL);
+            resolver.registerContentObserver(mMomentFixedAspectRatioUri, false, this,
                     UserHandle.USER_ALL);
             resolver.registerContentObserver(mPolicyControlUri, false, this, UserHandle.USER_ALL);
             if (DesktopModeHelper.isDesktopExperienceDevOptionSupported(mContext)) {
@@ -960,6 +964,11 @@ public class WindowManagerService extends IWindowManager.Stub
             }
 
             if (mMomentEnabledUri.equals(uri)) {
+                updateMomentEnabled();
+                return;
+            }
+
+            if (mMomentFixedAspectRatioUri.equals(uri)) {
                 updateMomentEnabled();
                 return;
             }
@@ -1129,6 +1138,9 @@ public class WindowManagerService extends IWindowManager.Stub
                     mContext.getContentResolver(), Settings.Secure.MOMENT_ENABLED, 0,
                     mCurrentUserId) != 0;
             mMomentController.setEnabledFromSettings(enabled);
+            mMomentController.setFixedAspectRatioFromSettings(Settings.Secure.getIntForUser(
+                    mContext.getContentResolver(), Settings.Secure.MOMENT_FIXED_ASPECT_RATIO, 0,
+                    mCurrentUserId) != 0);
         }
     }
 

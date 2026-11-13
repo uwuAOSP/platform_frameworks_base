@@ -6094,6 +6094,12 @@ class WindowState extends WindowContainer<WindowState> implements WindowManagerP
             }
         }
 
+        if (postDrawTransaction != null && mLastConfigReportedToClient
+                && syncSeqId >= (mWmService.mAlwaysSeqId ? mBufferSeqId : mSyncSeqId)
+                && getLastReportedConfiguration().windowConfiguration.getBounds().equals(
+                        getConfiguration().windowConfiguration.getBounds())) {
+            mWmService.mMomentController.onWindowLayoutDrawn(this, postDrawTransaction);
+        }
         final boolean hasSyncHandlers = executeDrawHandlers(postDrawTransaction, syncSeqId);
 
         boolean skipLayout = false;
