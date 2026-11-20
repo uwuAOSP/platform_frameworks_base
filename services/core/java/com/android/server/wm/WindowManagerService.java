@@ -853,6 +853,10 @@ public class WindowManagerService extends IWindowManager.Stub
                 Settings.Secure.getUriFor(Settings.Secure.MOMENT_ENABLED);
         private final Uri mMomentFixedAspectRatioUri =
                 Settings.Secure.getUriFor(Settings.Secure.MOMENT_FIXED_ASPECT_RATIO);
+        private final Uri mMomentAppJumpEnabledUri =
+                Settings.Secure.getUriFor(Settings.Secure.MOMENT_APP_JUMP_ENABLED);
+        private final Uri mMomentAppJumpSourcePackagesUri =
+                Settings.Secure.getUriFor(Settings.Secure.MOMENT_APP_JUMP_SOURCE_PACKAGES);
         private final Uri mPolicyControlUri =
                 Settings.Global.getUriFor(Settings.Global.POLICY_CONTROL);
         private final Uri mForceDesktopModeOnExternalDisplaysUri = Settings.Global.getUriFor(
@@ -894,6 +898,10 @@ public class WindowManagerService extends IWindowManager.Stub
             resolver.registerContentObserver(mMomentEnabledUri, false, this,
                     UserHandle.USER_ALL);
             resolver.registerContentObserver(mMomentFixedAspectRatioUri, false, this,
+                    UserHandle.USER_ALL);
+            resolver.registerContentObserver(mMomentAppJumpEnabledUri, false, this,
+                    UserHandle.USER_ALL);
+            resolver.registerContentObserver(mMomentAppJumpSourcePackagesUri, false, this,
                     UserHandle.USER_ALL);
             resolver.registerContentObserver(mPolicyControlUri, false, this, UserHandle.USER_ALL);
             if (DesktopModeHelper.isDesktopExperienceDevOptionSupported(mContext)) {
@@ -969,7 +977,9 @@ public class WindowManagerService extends IWindowManager.Stub
                 return;
             }
 
-            if (mMomentFixedAspectRatioUri.equals(uri)) {
+            if (mMomentFixedAspectRatioUri.equals(uri)
+                    || mMomentAppJumpEnabledUri.equals(uri)
+                    || mMomentAppJumpSourcePackagesUri.equals(uri)) {
                 updateMomentEnabled();
                 return;
             }
@@ -1142,6 +1152,11 @@ public class WindowManagerService extends IWindowManager.Stub
             mMomentController.setFixedAspectRatioFromSettings(Settings.Secure.getIntForUser(
                     mContext.getContentResolver(), Settings.Secure.MOMENT_FIXED_ASPECT_RATIO, 0,
                     mCurrentUserId) != 0);
+            mMomentController.setAppJumpSettingsFromSettings(mCurrentUserId,
+                    Settings.Secure.getIntForUser(mContext.getContentResolver(),
+                            Settings.Secure.MOMENT_APP_JUMP_ENABLED, 0, mCurrentUserId) != 0,
+                    Settings.Secure.getStringForUser(mContext.getContentResolver(),
+                            Settings.Secure.MOMENT_APP_JUMP_SOURCE_PACKAGES, mCurrentUserId));
         }
     }
 
@@ -9904,6 +9919,22 @@ public class WindowManagerService extends IWindowManager.Stub
         }
 
         final ActivityRecord touchedApp = t.getActivityRecord();
+        final Task touchedTask = getTaskForInputTarget(t);
+        final Task guardMomentTask = mMomentController.getAppJumpFocusGuardMomentTaskLocked(
+                touchedTask, touchedApp);
+        if (guardMomentTask != null) {
+            final Task focusedInputTask = getTaskForInputTarget(mFocusedInputTarget);
+            final WindowState curFocusedWindow = getFocusedWindowLocked();
+            final Task curFocusedTask = curFocusedWindow != null
+                    ? curFocusedWindow.getTask() : null;
+            if (focusedInputTask != null && focusedInputTask.getRootTask() == guardMomentTask
+                    && (curFocusedWindow == null
+                            || (curFocusedTask != null
+                                    && curFocusedTask.getRootTask() == guardMomentTask))) {
+                return;
+            }
+        }
+
         if (touchedApp != null && touchedApp.getTask() != null) {
             final ActivityRecord top = touchedApp.getTask().topRunningActivity();
             if (top != null && top != touchedApp && top.getTaskFragment().getBounds().contains(
@@ -9945,6 +9976,19 @@ public class WindowManagerService extends IWindowManager.Stub
         } else {
             handlePointerDownOutsideFocus(t, focusedInputTarget);
         }
+    }
+
+    @Nullable
+    private static Task getTaskForInputTarget(@Nullable InputTarget target) {
+        if (target == null) {
+            return null;
+        }
+        final ActivityRecord activity = target.getActivityRecord();
+        if (activity != null) {
+            return activity.getTask();
+        }
+        final WindowState win = target.getWindowState();
+        return win != null ? win.getTask() : null;
     }
 
     private boolean shouldDelayTouchOutside(InputTarget t) {
@@ -10066,6 +10110,20 @@ public class WindowManagerService extends IWindowManager.Stub
                     }
                 }
             }
+        }
+
+        final Task guardMomentTask = mMomentController.getAppJumpFocusGuardMomentTaskLocked(
+                task, touchedActivity);
+        if (guardMomentTask != null) {
+            final Task focusedRootTask = focusedTask != null ? focusedTask.getRootTask() : null;
+            if (focusedRootTask != guardMomentTask) {
+                final ActivityRecord momentTop = guardMomentTask.topRunningActivity(
+                        true /* focusableOnly */);
+                if (momentTop != null) {
+                    mAtmService.setFocusedTask(guardMomentTask.mTaskId, momentTop);
+                }
+            }
+            return;
         }
 
         mAtmService.setFocusedTask(task.mTaskId, touchedActivity);

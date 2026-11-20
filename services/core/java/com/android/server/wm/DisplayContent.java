@@ -1008,6 +1008,13 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
         if (activity != null && focusedApp != activity) {
             final Task rootTask = activity.getRootTask();
             if (rootTask != null && rootTask.getWindowingMode() == WINDOWING_MODE_MOMENT) {
+                if (mWmService.mMomentController.isAppJumpFocusGuardedAppLocked(
+                        rootTask, focusedApp)) {
+                    ProtoLog.v(WM_DEBUG_FOCUS_LIGHT,
+                            "findFocusedWindow: Keep focus on AppJump Moment @ %s", w);
+                    mTmpWindow = w;
+                    return true;
+                }
                 if (mTmpWindow == null) {
                     mTmpWindow = w;
                 }
@@ -2165,6 +2172,11 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
                 // Display orientation should be deferred until the top fixed rotation is finished.
                 return false;
             }
+            if (mWmService.mMomentController.shouldHoldBridgeRotationLocked(topCandidate)
+                    || (r != topCandidate
+                            && mWmService.mMomentController.shouldHoldBridgeRotationLocked(r))) {
+                return false;
+            }
         }
         return mDisplayRotation.updateOrientation(orientation, forceUpdate);
     }
@@ -2405,6 +2417,11 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
         return mFixedRotationLaunchingApp == r;
     }
 
+    @Nullable
+    ActivityRecord getFixedRotationLaunchingApp() {
+        return mFixedRotationLaunchingApp;
+    }
+
     @VisibleForTesting
     @Nullable AsyncRotationController getAsyncRotationController() {
         return mAsyncRotationController;
@@ -2474,6 +2491,10 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
         if (mFixedRotationLaunchingApp == null) {
             return;
         }
+        if (mWmService.mMomentController.shouldHoldBridgeRotationLocked(
+                mFixedRotationLaunchingApp)) {
+            return;
+        }
         // Update directly because the app which will change the orientation of display is ready.
         if (mDisplayRotation.updateOrientation(getOrientation(), false /* forceUpdate */)) {
             // If a transition is collecting, let the transition apply the rotation change on
@@ -2497,7 +2518,7 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
      * applying rotation to display) but the launching app has been transformed. So the record need
      * to be cleared and restored to stop using seamless rotation and rotated configuration.
      */
-    private void clearFixedRotationLaunchingApp() {
+    void clearFixedRotationLaunchingApp() {
         if (mFixedRotationLaunchingApp == null) {
             return;
         }
@@ -7523,6 +7544,10 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
                     // Continue to update orientation because the transition of the top rotated
                     // launching activity is done.
                 }
+            }
+            if (mWmService.mMomentController.shouldHoldBridgeRotationLocked(
+                    mFixedRotationLaunchingApp)) {
+                return;
             }
             continueUpdateOrientationForDiffOrienLaunchingApp();
         }

@@ -16,26 +16,38 @@
 
 package com.android.server.wm;
 
+import static android.app.Activity.RESULT_CANCELED;
 import static android.app.ActivityTaskManager.INVALID_TASK_ID;
+import static android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD;
+import static android.app.WindowConfiguration.ACTIVITY_TYPE_UNDEFINED;
 import static android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN;
 import static android.app.WindowConfiguration.WINDOWING_MODE_MOMENT;
+import static android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED;
+import static android.content.pm.ActivityInfo.SCREEN_ORIENTATION_BEHIND;
 
 import static com.android.server.wm.MomentGeometry.COMPACT_DISMISS_TARGET_SIZE_DP;
 import static com.android.server.wm.MomentGeometry.HANDLE_AREA_HEIGHT_DP;
 import static com.android.server.wm.MomentGeometry.HANDLE_MENU_TOP_INSET_DP;
 import static com.android.server.wm.MomentGeometry.HANDLE_MENU_WIDTH_DP;
 
+import android.annotation.NonNull;
+import android.annotation.Nullable;
 import android.app.ActivityOptions;
 import android.app.ActivityThread;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.content.pm.ApplicationInfo;
 import android.graphics.Rect;
 import android.hardware.input.InputManager;
 import android.os.Binder;
 import android.os.Bundle;
+import android.os.Process;
 import android.os.SystemClock;
 import android.os.SystemProperties;
+import android.os.UserHandle;
 import android.provider.Settings;
 import android.util.ArrayMap;
+import android.util.ArraySet;
 import android.util.Slog;
 import android.view.InputDevice;
 import android.view.KeyCharacterMap;
@@ -47,6 +59,7 @@ import com.android.internal.policy.ScreenDecorationsUtils;
 
 import java.io.PrintWriter;
 import java.util.ArrayList;
+import java.util.function.Predicate;
 
 final class MomentController {
 
@@ -72,9 +85,16 @@ final class MomentController {
     private final ArrayMap<Integer, MomentLayoutSnapshot> mLayoutSnapshots = new ArrayMap<>();
     private final ArrayMap<Integer, MomentHandleWindow> mHandleWindows = new ArrayMap<>();
     private final MomentTaskAnimationRunner mAnimationRunner;
+    private final ArraySet<String> mAppJumpSourcePackages = new ArraySet<>();
+    private final ArrayMap<Integer, AppJumpSession> mAppJumpSessions = new ArrayMap<>();
+    private final ArrayMap<ActivityRecord, BridgeOrientationRecord> mBridgeOrientations =
+            new ArrayMap<>();
+    private final ArraySet<ActivityRecord> mEvaluatingBridgeOrientations = new ArraySet<>();
 
     private boolean mEnabled;
     private boolean mFixedAspectRatio;
+    private boolean mAppJumpEnabled;
+    private int mAppJumpUserId = UserHandle.USER_NULL;
     private float mDefaultScale = DEFAULT_SCALE;
 
     MomentController(WindowManagerService service) {
@@ -92,6 +112,7 @@ final class MomentController {
         synchronized (mService.mGlobalLock) {
             mEnabled = enabled;
             if (!enabled) {
+                clearBridgeOrientationsLocked();
                 exitAllForUserLocked(mService.mCurrentUserId);
             }
         }
@@ -232,6 +253,1101 @@ final class MomentController {
     boolean isEnabledForUser(int userId) {
         return Settings.Secure.getIntForUser(mService.mContext.getContentResolver(),
                 Settings.Secure.MOMENT_ENABLED, 0, userId) != 0;
+    }
+
+    void setAppJumpSettingsFromSettings(int userId, boolean enabled, String packages) {
+        synchronized (mService.mGlobalLock) {
+            if (mAppJumpUserId != userId) {
+                clearAppJumpSessionsLocked();
+                clearBridgeOrientationsLocked();
+            } else if (!enabled) {
+                clearBridgeOrientationsLocked();
+            }
+            mAppJumpUserId = userId;
+            mAppJumpEnabled = enabled;
+            mAppJumpSourcePackages.clear();
+            if (packages != null) {
+                for (String packageName : packages.split(":")) {
+                    if (!packageName.isBlank()) {
+                        mAppJumpSourcePackages.add(packageName.trim());
+                    }
+                }
+            }
+        }
+    }
+
+    /** Internal launch state; never accepted from an app's Intent or ActivityOptions. */
+    static final class AppJumpLaunch {
+        final Task sourceTask;
+        @Nullable final ActivityRecord sourceActivity;
+        final String sourcePackage;
+        final String targetPackage;
+        final ActivityOptions options;
+        final AppJumpSession returningSession;
+        final AppJumpSession continuingSession;
+        final ArraySet<ActivityRecord> originalActivities = new ArraySet<>();
+        Task existingTask;
+
+        AppJumpLaunch(Task sourceTask, String sourcePackage, String targetPackage,
+                ActivityOptions options, AppJumpSession returningSession) {
+            this(sourceTask, returningSession != null ? returningSession.sourceActivity : null,
+                    sourcePackage, targetPackage, options, returningSession, null);
+        }
+
+        AppJumpLaunch(Task sourceTask, String sourcePackage, String targetPackage,
+                ActivityOptions options, AppJumpSession returningSession,
+                AppJumpSession continuingSession) {
+            this(sourceTask,
+                    returningSession != null ? returningSession.sourceActivity
+                            : (continuingSession != null
+                                    ? continuingSession.sourceActivity : null),
+                    sourcePackage, targetPackage, options, returningSession, continuingSession);
+        }
+
+        AppJumpLaunch(Task sourceTask, @Nullable ActivityRecord sourceActivity,
+                String sourcePackage, String targetPackage, ActivityOptions options,
+                AppJumpSession returningSession, AppJumpSession continuingSession) {
+            this.sourceTask = sourceTask;
+            this.sourceActivity = sourceActivity;
+            this.sourcePackage = sourcePackage;
+            this.targetPackage = targetPackage;
+            this.options = options;
+            this.returningSession = returningSession;
+            this.continuingSession = continuingSession;
+        }
+
+        boolean isReturnToSource() {
+            return returningSession != null;
+        }
+    }
+
+    private static final class AppJumpSession {
+        final Task task;
+        final Task sourceTask;
+        @Nullable final ActivityRecord sourceActivity;
+        final String sourcePackage;
+        final String targetPackage;
+        final int targetUid;
+        final boolean wasExistingTask;
+        final MomentAppJumpHandoff<ActivityRecord> handoff;
+        boolean dismissCheckScheduled;
+        boolean dismissRequested;
+        boolean autoDismiss = true;
+
+        AppJumpSession(Task task, AppJumpLaunch launch, ActivityRecord entryActivity) {
+            this.task = task;
+            sourceTask = launch.sourceTask;
+            sourceActivity = launch.sourceActivity != null
+                    ? launch.sourceActivity
+                    : (launch.continuingSession != null
+                            ? launch.continuingSession.sourceActivity : null);
+            sourcePackage = launch.sourcePackage;
+            targetPackage = launch.targetPackage;
+            targetUid = entryActivity.getUid();
+            wasExistingTask = launch.existingTask != null;
+            handoff = launch.continuingSession != null ? launch.continuingSession.handoff
+                    : new MomentAppJumpHandoff<>(entryActivity, launch.originalActivities);
+            if (launch.continuingSession != null) {
+                handoff.onTaskHandoff(launch.originalActivities);
+            }
+        }
+    }
+
+    private static final class BridgeOrientationRecord {
+        MomentAppJumpBridgePolicy.ProtectionMode mode;
+        long phaseBDeadlineUptimeMs;
+        long exitGraceDeadlineUptimeMs;
+        boolean orientationOverridden;
+        boolean rotationHeld;
+        @Nullable Runnable timeoutRunnable;
+
+        BridgeOrientationRecord(MomentAppJumpBridgePolicy.ProtectionMode mode,
+                long phaseBDeadlineUptimeMs) {
+            this.mode = mode;
+            this.phaseBDeadlineUptimeMs = phaseBDeadlineUptimeMs;
+        }
+    }
+
+    AppJumpLaunch prepareAppJumpMomentLaunchLocked(Intent intent, ActivityInfo target,
+            ActivityRecord source, String callingPackage, int callingUid, int userId,
+            ActivityOptions options, Task inTask, TaskFragment inTaskFragment) {
+        if (target == null || target.packageName == null || userId != mService.mCurrentUserId
+                || (intent != null && ActivityRecord.isHomeIntent(intent))) {
+            return null;
+        }
+        Task callerTask = source != null ? source.getTask()
+                : mService.mRoot.getTopDisplayFocusedRootTask();
+        if (source == null && callerTask != null) {
+            final ActivityRecord top = callerTask.getTopNonFinishingActivity();
+            if (top == null || !top.packageName.equals(callingPackage)
+                    || top.getUid() != callingUid) {
+                callerTask = null;
+            }
+        }
+        AppJumpSession callerSession = callerTask != null
+                ? mAppJumpSessions.get(callerTask.getRootTaskId()) : null;
+        if (callerSession == null && source == null) {
+            callerSession = findRecentAppJumpHandoffLocked(callingPackage, callingUid,
+                    target.packageName, userId);
+            if (callerSession != null) {
+                callerTask = callerSession.task;
+            }
+        }
+        if (callerSession != null
+                && callerSession.targetUid == callingUid
+                && callerSession.targetPackage.equals(callingPackage)
+                && (callerTask.getWindowingMode() == WINDOWING_MODE_MOMENT
+                        || (!callerSession.autoDismiss
+                        && callerTask.getWindowingMode() == WINDOWING_MODE_FULLSCREEN))
+                && callerSession.sourcePackage.equals(target.packageName)
+                && callerSession.sourceTask.isAttached()
+                && callerSession.sourceTask.getWindowingMode() == WINDOWING_MODE_FULLSCREEN
+                && callerSession.sourceTask.mUserId == userId) {
+            final ActivityOptions returnOptions = copyAppJumpOptions(options);
+            returnOptions.setLaunchWindowingMode(WINDOWING_MODE_FULLSCREEN);
+            returnOptions.setLaunchBounds(null);
+            return new AppJumpLaunch(callerSession.sourceTask, callerSession.sourceActivity,
+                    callerSession.sourcePackage, target.packageName, returnOptions,
+                    callerSession, null /* continuingSession */);
+        }
+        if (!mEnabled || !mAppJumpEnabled || mAppJumpUserId != userId
+                || mAppJumpSourcePackages.isEmpty() || !Process.isApplicationUid(callingUid)
+                || target.applicationInfo == null
+                || (target.applicationInfo.flags
+                        & (ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP))
+                        != 0
+                || ActivityStartInterceptor.isAllowedSystemMediatorTarget(target)
+                || inTask != null || inTaskFragment != null) {
+            return null;
+        }
+        if (options != null
+                && ((options.getLaunchWindowingMode() != WINDOWING_MODE_UNDEFINED
+                        && options.getLaunchWindowingMode() != WINDOWING_MODE_FULLSCREEN)
+                        || (options.getLaunchActivityType() != ACTIVITY_TYPE_UNDEFINED
+                        && options.getLaunchActivityType() != ACTIVITY_TYPE_STANDARD)
+                        || options.getLaunchTaskId() != INVALID_TASK_ID
+                        || options.getLaunchRootTask() != null
+                        || options.getLaunchTaskFragmentToken() != null
+                        || options.isLaunchIntoPip())) {
+            return null;
+        }
+        if (callerSession != null && callerSession.autoDismiss
+                && callerSession.task.getWindowingMode() == WINDOWING_MODE_MOMENT
+                && callerSession.targetUid == callingUid
+                && target.applicationInfo.uid == callingUid
+                && callerSession.targetPackage.equals(callingPackage)
+                && callerSession.targetPackage.equals(target.packageName)
+                && callerSession.sourceTask.isAttached()
+                && callerSession.sourceTask.getWindowingMode() == WINDOWING_MODE_FULLSCREEN
+                && callerSession.sourceTask.mUserId == userId
+                && (options == null || options.getLaunchDisplayId() == -1
+                        || options.getLaunchDisplayId() == callerSession.task.getDisplayId())
+                && callerSession.handoff.canHandoffToTask(
+                        callerSession.task.getTopNonFinishingActivity(),
+                        SystemClock.uptimeMillis())
+                && ((intent != null && (intent.getFlags() & Intent.FLAG_ACTIVITY_NEW_TASK) != 0)
+                        || target.launchMode == ActivityInfo.LAUNCH_SINGLE_TASK
+                        || target.launchMode == ActivityInfo.LAUNCH_SINGLE_INSTANCE
+                        || target.launchMode == ActivityInfo.LAUNCH_SINGLE_INSTANCE_PER_TASK)) {
+            final ActivityOptions handoffOptions = copyAppJumpOptions(options);
+            handoffOptions.setLaunchWindowingMode(WINDOWING_MODE_MOMENT);
+            handoffOptions.setLaunchDisplayId(callerSession.task.getDisplayId());
+            handoffOptions.setLaunchBounds(callerSession.task.getBounds());
+            return new AppJumpLaunch(callerSession.sourceTask, callerSession.sourceActivity,
+                    callerSession.sourcePackage, target.packageName, handoffOptions,
+                    null /* returningSession */, callerSession);
+        }
+        final boolean fromResolver = "com.android.intentresolver".equals(callingPackage)
+                || (source != null && (source.isResolverOrDelegateActivity()
+                        || "com.android.intentresolver".equals(source.packageName)));
+        final DisplayContent display = source != null ? source.getDisplayContent()
+                : mService.getDefaultDisplayContentLocked();
+        if (display == null) {
+            return null;
+        }
+        if (fromResolver || source == null || !source.packageName.equals(callingPackage)) {
+            // Chooser may be in its own task or on top of the original app's task.
+            source = display.getActivity(activity -> isAppJumpSourceActivity(activity, userId)
+                    && !ActivityStartInterceptor.isAllowedSystemMediatorTarget(activity.info)
+                    && !activity.isResolverOrDelegateActivity()
+                    && (fromResolver || (activity.packageName.equals(callingPackage)
+                            && activity.getUid() == callingUid)));
+        }
+        if (!isAppJumpSourceActivity(source, userId)
+                || !mAppJumpSourcePackages.contains(source.packageName)
+                || source.packageName.equals(target.packageName)
+                || (!fromResolver && source.getUid() != callingUid)
+                || (options != null && options.getLaunchDisplayId() != -1
+                        && options.getLaunchDisplayId() != display.getDisplayId())) {
+            return null;
+        }
+        final ActivityOptions launchOptions = copyAppJumpOptions(options);
+        launchOptions.setLaunchWindowingMode(WINDOWING_MODE_MOMENT);
+        launchOptions.setLaunchDisplayId(display.getDisplayId());
+        final Rect bounds = display.getBounds();
+        if (bounds.width() > bounds.height()) {
+            launchOptions.setLaunchBounds(new Rect(0, 0, bounds.height(), bounds.width()));
+        }
+        return new AppJumpLaunch(source.getTask(), source, source.packageName, target.packageName,
+                launchOptions, null /* returningSession */, null /* continuingSession */);
+    }
+
+    private AppJumpSession findRecentAppJumpHandoffLocked(String callingPackage, int callingUid,
+            String targetPackage, int userId) {
+        AppJumpSession match = null;
+        final long now = SystemClock.uptimeMillis();
+        for (int i = 0; i < mAppJumpSessions.size(); i++) {
+            final AppJumpSession session = mAppJumpSessions.valueAt(i);
+            if (!session.autoDismiss || session.targetUid != callingUid
+                    || !session.targetPackage.equals(callingPackage)
+                    || (!session.targetPackage.equals(targetPackage)
+                            && !session.sourcePackage.equals(targetPackage))
+                    || session.task.mUserId != userId || !session.task.isAttached()
+                    || session.task.getWindowingMode() != WINDOWING_MODE_MOMENT
+                    || !session.handoff.canHandoffToTask(
+                            session.task.getTopNonFinishingActivity(), now)) {
+                continue;
+            }
+            // Context launches have no Activity token. Never guess between concurrent flows.
+            if (match != null) {
+                return null;
+            }
+            match = session;
+        }
+        return match;
+    }
+
+    private static ActivityOptions copyAppJumpOptions(ActivityOptions options) {
+        return options != null ? ActivityOptions.fromBundle(options.toBundle())
+                : ActivityOptions.makeBasic();
+    }
+
+    private static boolean isAppJumpSourceActivity(ActivityRecord activity, int userId) {
+        return activity != null && !activity.finishing && activity.mUserId == userId
+                && activity.isVisibleRequested() && activity.getTask() != null
+                && activity.getTask().isActivityTypeStandard()
+                && activity.getTask().getWindowingMode() == WINDOWING_MODE_FULLSCREEN;
+    }
+
+    boolean canReuseAppJumpTaskLocked(AppJumpLaunch launch, Task task) {
+        if (task == null || task == launch.sourceTask || task.getRootTask() != task
+                || !task.isLeafTask() || !task.isActivityTypeStandard()
+                || task.mUserId != launch.sourceTask.mUserId
+                || task.getDisplayId() != launch.sourceTask.getDisplayId()) {
+            return false;
+        }
+        final AppJumpSession session = mAppJumpSessions.get(task.mTaskId);
+        if (task.getWindowingMode() == WINDOWING_MODE_MOMENT) {
+            return session != null && session.autoDismiss && !session.dismissRequested
+                    && session.sourceTask == launch.sourceTask;
+        }
+        final ActivityRecord root = task.getRootActivity();
+        return session == null && task.getWindowingMode() == WINDOWING_MODE_FULLSCREEN
+                && !task.isVisibleRequested() && root != null
+                && launch.targetPackage.equals(root.packageName);
+    }
+
+    void onAppJumpTaskResolvedLocked(AppJumpLaunch launch, Task task) {
+        if (launch.continuingSession != null && task == launch.continuingSession.task) {
+            return;
+        }
+        if (launch.returningSession == null && task != null) {
+            launch.existingTask = task;
+            task.forAllActivities(activity -> {
+                launch.originalActivities.add(activity);
+            });
+        }
+    }
+
+    void onAppJumpLaunchSucceededLocked(AppJumpLaunch launch, ActivityRecord entry) {
+        if (launch.returningSession != null) {
+            armPostSessionExitGraceForSessionLocked(launch.returningSession, entry);
+            launch.returningSession.handoff.onReturnToSource();
+            if (launch.returningSession.autoDismiss) {
+                dismissAppJumpTaskLocked(launch.returningSession);
+            } else {
+                releaseAppJumpSessionLocked(mAppJumpSessions.remove(
+                        launch.returningSession.task.mTaskId));
+            }
+            return;
+        }
+        final Task task = entry != null ? entry.getTask() : null;
+        if (task == null || task == launch.sourceTask
+                || task.getWindowingMode() != WINDOWING_MODE_MOMENT
+                || mAppJumpSessions.containsKey(task.mTaskId)) {
+            return;
+        }
+        if (launch.continuingSession != null) {
+            final AppJumpSession previous = launch.continuingSession;
+            if (mAppJumpSessions.get(previous.task.mTaskId) != previous) {
+                return;
+            }
+            cancelAppJumpDismissLocked(previous);
+            mAppJumpSessions.remove(previous.task.mTaskId);
+            final AppJumpSession nextSession = new AppJumpSession(task, launch, entry);
+            mAppJumpSessions.put(task.mTaskId, nextSession);
+            activatePhaseABridgeProtectionLocked(nextSession);
+            // Completion and its pending SDK result now belong to the new task. Retire only
+            // the previous container, without reporting a cancel during the handoff.
+            if (previous.wasExistingTask && previous.task.hasChild()) {
+                exitMomentTaskLocked(previous.task, false /* captureSnapshot */);
+                previous.task.moveTaskToBack(previous.task);
+            } else {
+                closeMomentTaskLocked(previous.task);
+            }
+            return;
+        }
+        final AppJumpSession session = new AppJumpSession(task, launch, entry);
+        mAppJumpSessions.put(task.mTaskId, session);
+        activatePhaseABridgeProtectionLocked(session);
+    }
+
+    void onAppJumpLaunchFailedLocked(AppJumpLaunch launch) {
+        final Task task = launch.existingTask;
+        if (task != null && task.isAttached()
+                && task.getWindowingMode() == WINDOWING_MODE_MOMENT
+                && !mAppJumpSessions.containsKey(task.mTaskId)) {
+            exitMomentTaskLocked(task, false /* captureSnapshot */);
+            task.moveTaskToBack(task);
+        }
+    }
+
+    void onAppJumpActivityFinishingLocked(ActivityRecord activity) {
+        clearBridgeOrientationLocked(activity);
+        final Task task = activity.getTask();
+        final AppJumpSession session = task != null
+                ? mAppJumpSessions.get(task.getRootTaskId()) : null;
+        if (session == null) {
+            return;
+        }
+        session.handoff.onActivityFinishing(activity, SystemClock.uptimeMillis());
+        scheduleAppJumpDismissCheckLocked(session);
+    }
+
+    void onAppJumpActivityRemovedLocked(@NonNull ActivityRecord activity) {
+        clearBridgeOrientationLocked(activity);
+    }
+
+    void onAppJumpActivityLaunchedLocked(ActivityRecord activity) {
+        final Task task = activity != null ? activity.getTask() : null;
+        final AppJumpSession session = task != null
+                ? mAppJumpSessions.get(task.getRootTaskId()) : null;
+        if (session == null || session.handoff.hasReturnedToSource()) {
+            return;
+        }
+        session.handoff.onActivityLaunched(activity, SystemClock.uptimeMillis());
+        if (session.dismissRequested) {
+            cancelAppJumpDismissLocked(session);
+        }
+        scheduleAppJumpDismissCheckLocked(session);
+    }
+
+    boolean deferAppJumpCanceledResultLocked(ActivityRecord activity, int resultCode,
+            Intent resultData) {
+        if (resultCode != RESULT_CANCELED || resultData != null || activity.resultTo == null) {
+            return false;
+        }
+        final Task task = activity.getTask();
+        final AppJumpSession session = task != null
+                ? mAppJumpSessions.get(task.getRootTaskId()) : null;
+        if (session == null) {
+            return false;
+        }
+        final ActivityRecord receiver = activity.resultTo;
+        final String resultWho = activity.resultWho;
+        final int requestCode = activity.requestCode;
+        final int callingUid = activity.getUid();
+        return session.handoff.deferCanceledResult(activity, () -> {
+            if (receiver.isInRootTaskLocked() && !receiver.finishing) {
+                receiver.sendResult(callingUid, resultWho, requestCode, RESULT_CANCELED,
+                        null /* data */, new Binder(), null /* dataGrants */);
+            }
+        });
+    }
+
+    boolean shouldDeferEmptyAppJumpTaskRemovalLocked(Task task) {
+        final AppJumpSession session = mAppJumpSessions.get(task.mTaskId);
+        return session != null && session.handoff.isEntryFinished() && !task.mInRemoveTask
+                && task.getTopNonFinishingActivity() == null && !task.isClearingToReuseTask();
+    }
+
+    private void scheduleAppJumpDismissCheckLocked(AppJumpSession session) {
+        if (!session.handoff.isEntryFinished() || session.dismissRequested
+                || session.dismissCheckScheduled) {
+            return;
+        }
+        session.dismissCheckScheduled = true;
+        mService.mH.postDelayed(() -> {
+            synchronized (mService.mGlobalLock) {
+                session.dismissCheckScheduled = false;
+                if (mAppJumpSessions.get(session.task.mTaskId) != session
+                        || session.task.isClearingToReuseTask()) {
+                    return;
+                }
+                final ActivityRecord top = session.task.getTopNonFinishingActivity();
+                final long now = SystemClock.uptimeMillis();
+                if (session.handoff.remainingDelay(now) > 0) {
+                    scheduleAppJumpDismissCheckLocked(session);
+                } else if (session.handoff.shouldDismiss(top, now)) {
+                    if (session.autoDismiss) {
+                        dismissAppJumpTaskLocked(session);
+                    } else {
+                        releaseAppJumpSessionLocked(mAppJumpSessions.remove(session.task.mTaskId));
+                    }
+                }
+            }
+        }, session.handoff.remainingDelay(SystemClock.uptimeMillis()));
+    }
+
+    private void cancelAppJumpDismissLocked(AppJumpSession session) {
+        session.dismissRequested = false;
+        final MomentTaskSurfaceState state = getStateLocked(session.task);
+        if (state != null && state.isClosing()) {
+            cancelTaskAnimationLocked(session.task, state);
+            state.cancelCloseAnimation(session.task.getSyncTransaction(), true /* restoreTask */);
+            updateHandleWindowLocked(session.task);
+            scheduleMomentSurfaceUpdateLocked(session.task);
+        }
+    }
+
+    private void releaseAppJumpSessionLocked(AppJumpSession session) {
+        if (session == null) {
+            return;
+        }
+        armPostSessionExitGraceForSessionLocked(session, null /* extraBridge */);
+        session.handoff.finish();
+        // Releasing ownership must also release any empty task kept for an async handoff.
+        mService.mH.post(() -> {
+            synchronized (mService.mGlobalLock) {
+                if (!mAppJumpSessions.containsKey(session.task.mTaskId)
+                        && session.task.isAttached() && !session.task.hasChild()) {
+                    session.task.removeIfPossible("app-jump-session-ended");
+                }
+            }
+        });
+    }
+
+    private void clearAppJumpSessionsLocked() {
+        final ArrayList<AppJumpSession> sessions = new ArrayList<>(mAppJumpSessions.values());
+        mAppJumpSessions.clear();
+        for (AppJumpSession session : sessions) {
+            releaseAppJumpSessionLocked(session);
+        }
+    }
+
+    private void stopAppJumpWindowOwnershipLocked(Task task) {
+        final AppJumpSession session = mAppJumpSessions.get(task.mTaskId);
+        if (session != null && session.handoff.hasPendingCanceledResult()) {
+            // A manual expansion ends automatic window ownership, but not an outstanding
+            // SDK handoff. Keep its provisional cancel until completion or a real callback.
+            session.autoDismiss = false;
+            session.dismissRequested = false;
+        } else {
+            releaseAppJumpSessionLocked(mAppJumpSessions.remove(task.mTaskId));
+        }
+    }
+
+    @Nullable
+    Task getAppJumpFocusGuardMomentTaskLocked(@Nullable Task targetTask,
+            @Nullable ActivityRecord touchedActivity) {
+        final Task resolvedTask = targetTask != null
+                ? targetTask
+                : (touchedActivity != null ? touchedActivity.getTask() : null);
+        final Task targetRootTask = resolvedTask != null ? resolvedTask.getRootTask() : null;
+        if (targetRootTask == null) {
+            return null;
+        }
+        for (int i = 0; i < mAppJumpSessions.size(); i++) {
+            final AppJumpSession session = mAppJumpSessions.valueAt(i);
+            final Task momentRootTask = session.task.getRootTask();
+            if (momentRootTask != null
+                    && shouldGuardSessionForTaskLocked(session, targetRootTask, momentRootTask)) {
+                return momentRootTask;
+            }
+        }
+        return null;
+    }
+
+    boolean isAppJumpFocusGuardedAppLocked(@Nullable Task momentRootTask,
+            @Nullable ActivityRecord focusedApp) {
+        if (momentRootTask == null || focusedApp == null) {
+            return false;
+        }
+        final Task focusedTask = focusedApp.getTask();
+        final Task focusedRootTask = focusedTask != null ? focusedTask.getRootTask() : null;
+        if (focusedRootTask == null) {
+            return false;
+        }
+        AppJumpSession session = mAppJumpSessions.get(momentRootTask.mTaskId);
+        if (session == null) {
+            for (int i = 0; i < mAppJumpSessions.size(); i++) {
+                final AppJumpSession candidate = mAppJumpSessions.valueAt(i);
+                if (candidate.task.getRootTask() == momentRootTask) {
+                    session = candidate;
+                    break;
+                }
+            }
+        }
+        return session != null
+                && shouldGuardSessionForTaskLocked(session, focusedRootTask, momentRootTask);
+    }
+
+    private boolean shouldGuardSessionForTaskLocked(@NonNull AppJumpSession session,
+            @NonNull Task targetRootTask, @NonNull Task momentRootTask) {
+        if (session.sourceTask == null || !session.sourceTask.isAttached()) {
+            return false;
+        }
+        final Task sourceRootTask = session.sourceTask.getRootTask();
+        if (sourceRootTask == null) {
+            return false;
+        }
+        final boolean momentAttached = session.task.isAttached();
+        final boolean momentWindowingMode =
+                session.task.getWindowingMode() == WINDOWING_MODE_MOMENT
+                        && momentRootTask.getWindowingMode() == WINDOWING_MODE_MOMENT;
+        // During an async handoff (entry activity finished, waiting up to QUIET_PERIOD_MS for the
+        // next flow activity), the Moment task stays attached without active children and its
+        // mVisibleRequested drops transiently; keep guarding while source remains visible.
+        final boolean momentVisibleOrHandoff = session.task.isVisibleRequested()
+                || (session.handoff.isEntryFinished() && !session.task.isClearingToReuseTask()
+                        && session.sourceTask.isVisibleRequested());
+        final boolean sameRootTask = targetRootTask == sourceRootTask;
+        final boolean momentCompact = isMomentCompact(session.task);
+        final ActivityRecord topSource = session.sourceTask.getTopNonFinishingActivity();
+        final ActivityRecord rootSource = session.sourceTask.getRootActivity();
+        final boolean isNonRootSourceBridgeTop = session.sourceActivity != null
+                && !session.sourceActivity.finishing
+                && topSource == session.sourceActivity
+                && session.sourceActivity != rootSource;
+        return MomentAppJumpBridgePolicy.shouldGuardSourceTaskFocus(
+                session.autoDismiss,
+                session.dismissRequested,
+                momentAttached,
+                momentWindowingMode,
+                momentVisibleOrHandoff,
+                sameRootTask,
+                momentCompact,
+                isNonRootSourceBridgeTop);
+    }
+
+    void onAppJumpCandidateActivityStartingLocked(@Nullable ActivityRecord starting) {
+        if (!isBridgePackageEnabledLocked(starting)) {
+            return;
+        }
+        final Task task = starting.getTask();
+        if (!isEligibleBridgeTask(task) || hasActivePhaseASessionForTaskLocked(task)) {
+            return;
+        }
+        final int rawOrientation = starting.getRawOverrideOrientationLocked();
+        if (MomentAppJumpBridgePolicy.isFixedOrientationLandscape(rawOrientation)
+                || !hasLandscapeDefiningActivityBelowLocked(starting, task, false /* phaseA */)) {
+            return;
+        }
+        final String className = starting.mActivityComponent != null
+                ? starting.mActivityComponent.getClassName() : null;
+        final MomentAppJumpBridgePolicy.ProtectionMode mode =
+                MomentAppJumpBridgePolicy.classifyPhaseBBridge(
+                        starting.mStyleFillsParent,
+                        starting.occludesParent(),
+                        starting.isNoDisplay(),
+                        className,
+                        rawOrientation,
+                        starting.providesOrientation(),
+                        true /* hasLandscapeDefiningBelow */);
+        final boolean highConfidence = MomentAppJumpBridgePolicy.isHighConfidenceBridge(
+                starting.mStyleFillsParent, starting.occludesParent(), starting.isNoDisplay(),
+                className);
+        final long timeoutMs = (mode == MomentAppJumpBridgePolicy.ProtectionMode.TIER1_BEHIND
+                || (mode == MomentAppJumpBridgePolicy.ProtectionMode.NONE && highConfidence))
+                ? MomentAppJumpBridgePolicy.PHASE_B_TIER1_TIMEOUT_MS
+                : MomentAppJumpBridgePolicy.PHASE_B_TIER2_HOLD_MS;
+        final long now = SystemClock.uptimeMillis();
+        BridgeOrientationRecord record = mBridgeOrientations.get(starting);
+        if (record == null) {
+            record = new BridgeOrientationRecord(mode, now + timeoutMs);
+            mBridgeOrientations.put(starting, record);
+        } else {
+            record.mode = mode;
+            record.phaseBDeadlineUptimeMs = now + timeoutMs;
+            record.exitGraceDeadlineUptimeMs = 0;
+            record.orientationOverridden = false;
+            record.rotationHeld = false;
+        }
+        scheduleBridgeTimeoutLocked(starting, record, timeoutMs);
+    }
+
+    void onAppJumpBridgeActivityLaunchFailedLocked(@Nullable ActivityRecord starting) {
+        clearBridgeOrientationLocked(starting);
+    }
+
+    int overrideAppJumpBridgeOrientationLocked(@NonNull ActivityRecord activity,
+            int candidateOrientation) {
+        if (activity == null || mEvaluatingBridgeOrientations.contains(activity)
+                || !isBridgePackageEnabledLocked(activity)) {
+            return candidateOrientation;
+        }
+        final Task task = activity.getTask();
+        if (!isEligibleBridgeTask(task)
+                || !MomentAppJumpBridgePolicy.shouldProtectCandidateOrientation(
+                        candidateOrientation, activity.providesOrientation())) {
+            return candidateOrientation;
+        }
+        if (hasActivePhaseASessionForTaskLocked(task)) {
+            if (hasLandscapeDefiningActivityBelowLocked(activity, task, true /* phaseA */)) {
+                final BridgeOrientationRecord record = mBridgeOrientations.get(activity);
+                if (record != null) {
+                    record.orientationOverridden = true;
+                }
+                return SCREEN_ORIENTATION_BEHIND;
+            }
+            return candidateOrientation;
+        }
+        final BridgeOrientationRecord record = mBridgeOrientations.get(activity);
+        if (record == null) {
+            return candidateOrientation;
+        }
+        final long now = SystemClock.uptimeMillis();
+        final boolean exitGraceActive = record.exitGraceDeadlineUptimeMs > now;
+        final boolean phaseBActive = record.phaseBDeadlineUptimeMs > now;
+        if (!exitGraceActive && !phaseBActive) {
+            return candidateOrientation;
+        }
+        if (!hasLandscapeDefiningActivityBelowLocked(
+                activity, task, exitGraceActive /* phaseA */)) {
+            return candidateOrientation;
+        }
+        if (exitGraceActive) {
+            record.orientationOverridden = true;
+            return SCREEN_ORIENTATION_BEHIND;
+        }
+        if (record.mode == MomentAppJumpBridgePolicy.ProtectionMode.NONE) {
+            final String className = activity.mActivityComponent != null
+                    ? activity.mActivityComponent.getClassName() : null;
+            final MomentAppJumpBridgePolicy.ProtectionMode upgraded =
+                    MomentAppJumpBridgePolicy.classifyPhaseBBridge(
+                            activity.mStyleFillsParent,
+                            activity.occludesParent(),
+                            activity.isNoDisplay(),
+                            className,
+                            candidateOrientation,
+                            activity.providesOrientation(),
+                            true /* hasLandscapeDefiningBelow */);
+            if (upgraded != MomentAppJumpBridgePolicy.ProtectionMode.NONE) {
+                record.mode = upgraded;
+            }
+        }
+        if (record.mode == MomentAppJumpBridgePolicy.ProtectionMode.TIER1_BEHIND) {
+            record.orientationOverridden = true;
+            return SCREEN_ORIENTATION_BEHIND;
+        }
+        return candidateOrientation;
+    }
+
+    boolean shouldHoldBridgeRotationLocked(@Nullable ActivityRecord activity) {
+        if (!isBridgePackageEnabledLocked(activity)) {
+            return false;
+        }
+        final Task task = activity.getTask();
+        if (!isEligibleBridgeTask(task) || hasActivePhaseASessionForTaskLocked(task)) {
+            return false;
+        }
+        final BridgeOrientationRecord record = mBridgeOrientations.get(activity);
+        if (record == null) {
+            return false;
+        }
+        final long now = SystemClock.uptimeMillis();
+        if (record.phaseBDeadlineUptimeMs <= now || record.exitGraceDeadlineUptimeMs > now) {
+            return false;
+        }
+        if (record.mode == MomentAppJumpBridgePolicy.ProtectionMode.NONE) {
+            final int rawOrientation = activity.getRawOverrideOrientationLocked();
+            if (MomentAppJumpBridgePolicy.shouldProtectCandidateOrientation(
+                    rawOrientation, activity.providesOrientation())
+                    && hasLandscapeDefiningActivityBelowLocked(activity, task, false /* phaseA */)) {
+                final String className = activity.mActivityComponent != null
+                        ? activity.mActivityComponent.getClassName() : null;
+                record.mode = MomentAppJumpBridgePolicy.classifyPhaseBBridge(
+                        activity.mStyleFillsParent,
+                        activity.occludesParent(),
+                        activity.isNoDisplay(),
+                        className,
+                        rawOrientation,
+                        activity.providesOrientation(),
+                        true /* hasLandscapeDefiningBelow */);
+            }
+        }
+        if (record.mode != MomentAppJumpBridgePolicy.ProtectionMode.TIER2_DISPLAY_HOLD
+                || !hasLandscapeDefiningActivityBelowLocked(
+                        activity, task, false /* phaseA */)) {
+            return false;
+        }
+        record.rotationHeld = true;
+        return true;
+    }
+
+    private boolean isBridgePackageEnabledLocked(@Nullable ActivityRecord activity) {
+        return activity != null
+                && !activity.finishing
+                && !activity.isResolverOrDelegateActivity()
+                && mEnabled
+                && mAppJumpEnabled
+                && activity.mUserId == mAppJumpUserId
+                && activity.packageName != null
+                && mAppJumpSourcePackages.contains(activity.packageName);
+    }
+
+    private static boolean isEligibleBridgeTask(@Nullable Task task) {
+        return task != null
+                && task.isActivityTypeStandard()
+                && task.getWindowingMode() == WINDOWING_MODE_FULLSCREEN;
+    }
+
+    private boolean hasActivePhaseASessionForTaskLocked(@Nullable Task task) {
+        return hasOtherActivePhaseASessionForTaskLocked(task, null /* excluded */);
+    }
+
+    private boolean hasOtherActivePhaseASessionForTaskLocked(@Nullable Task task,
+            @Nullable AppJumpSession excluded) {
+        if (task == null) {
+            return false;
+        }
+        for (int i = 0; i < mAppJumpSessions.size(); i++) {
+            final AppJumpSession session = mAppJumpSessions.valueAt(i);
+            if (session != excluded
+                    && session.sourceTask == task
+                    && session.task.isAttached()
+                    && session.task.getWindowingMode() == WINDOWING_MODE_MOMENT) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasLandscapeDefiningActivityBelowLocked(@NonNull ActivityRecord activity,
+            @NonNull Task task, boolean phaseA) {
+        final ActivityRecord below = findDefiningActivityBelowLocked(activity, task, phaseA);
+        if (below == null) {
+            return false;
+        }
+        final int rawBelow = below.getRawOverrideOrientationLocked();
+        final int requestedConfigOrientation = below.getRequestedConfigurationOrientation(
+                false /* forDisplay */, rawBelow);
+        final int currentConfigOrientation = below.getConfiguration().orientation;
+        return MomentAppJumpBridgePolicy.isLandscapeDefiningActivity(
+                rawBelow, requestedConfigOrientation, currentConfigOrientation, phaseA);
+    }
+
+    @Nullable
+    private ActivityRecord findDefiningActivityBelowLocked(@NonNull ActivityRecord activity,
+            @NonNull Task task, boolean phaseA) {
+        final long now = SystemClock.uptimeMillis();
+        final Predicate<ActivityRecord> predicate = below -> {
+            if (below == activity || below.finishing
+                    || mEvaluatingBridgeOrientations.contains(below)) {
+                return false;
+            }
+            final BridgeOrientationRecord belowRecord = mBridgeOrientations.get(below);
+            if (belowRecord != null
+                    && belowRecord.mode != MomentAppJumpBridgePolicy.ProtectionMode.NONE
+                    && (phaseA || belowRecord.phaseBDeadlineUptimeMs > now
+                            || belowRecord.exitGraceDeadlineUptimeMs > now)) {
+                return false;
+            }
+            mEvaluatingBridgeOrientations.add(below);
+            try {
+                final int rawBelow = below.getRawOverrideOrientationLocked();
+                return MomentAppJumpBridgePolicy.isDefiningOrientationCandidate(
+                        rawBelow, below.providesOrientation());
+            } finally {
+                mEvaluatingBridgeOrientations.remove(below);
+            }
+        };
+        if (activity.isDescendantOf(task)) {
+            return task.getActivity(predicate, activity /* boundary */,
+                    false /* includeBoundary */, true /* traverseTopToBottom */);
+        }
+        return task.getActivity(predicate, true /* traverseTopToBottom */);
+    }
+
+    private void activatePhaseABridgeProtectionLocked(@NonNull AppJumpSession session) {
+        final Task sourceTask = session.sourceTask;
+        if (sourceTask == null || !sourceTask.isAttached()) {
+            return;
+        }
+        boolean clearedPhaseBHold = false;
+        for (int i = mBridgeOrientations.size() - 1; i >= 0; i--) {
+            final ActivityRecord bridge = mBridgeOrientations.keyAt(i);
+            if (bridge.getTask() != sourceTask) {
+                continue;
+            }
+            final BridgeOrientationRecord record = mBridgeOrientations.valueAt(i);
+            if (record.timeoutRunnable != null) {
+                mService.mH.removeCallbacks(record.timeoutRunnable);
+                record.timeoutRunnable = null;
+            }
+            record.phaseBDeadlineUptimeMs = 0;
+            if (record.mode == MomentAppJumpBridgePolicy.ProtectionMode.TIER2_DISPLAY_HOLD
+                    || record.rotationHeld) {
+                clearedPhaseBHold = true;
+            }
+            if (bridge.finishing || !bridge.isAttached()) {
+                mBridgeOrientations.removeAt(i);
+                continue;
+            }
+            final int raw = bridge.getRawOverrideOrientationLocked();
+            if (MomentAppJumpBridgePolicy.shouldProtectCandidateOrientation(
+                    raw, bridge.providesOrientation())) {
+                record.mode = MomentAppJumpBridgePolicy.ProtectionMode.TIER1_BEHIND;
+                record.orientationOverridden = true;
+            } else {
+                mBridgeOrientations.removeAt(i);
+            }
+        }
+        final DisplayContent dc = sourceTask.getDisplayContent();
+        if (dc == null) {
+            return;
+        }
+        final ActivityRecord fixedApp = dc.getFixedRotationLaunchingApp();
+        if (fixedApp != null && fixedApp.getTask() == sourceTask) {
+            final int rawFixed = fixedApp.getRawOverrideOrientationLocked();
+            if (overrideAppJumpBridgeOrientationLocked(fixedApp, rawFixed) != rawFixed) {
+                dc.clearFixedRotationLaunchingApp();
+                fixedApp.clearAppCompatSizeCompatForBridgeLocked();
+                fixedApp.ensureActivityConfiguration();
+                dc.updateOrientation();
+                return;
+            }
+        }
+        if (clearedPhaseBHold) {
+            dc.updateOrientation();
+        }
+    }
+
+    private void armPostSessionExitGraceForSessionLocked(@Nullable AppJumpSession session,
+            @Nullable ActivityRecord extraBridge) {
+        if (session == null || !mEnabled || !mAppJumpEnabled) {
+            return;
+        }
+        final Task sourceTask = session.sourceTask;
+        if (sourceTask == null || !sourceTask.isAttached()
+                || sourceTask.mUserId != mAppJumpUserId
+                || !isEligibleBridgeTask(sourceTask)
+                || hasOtherActivePhaseASessionForTaskLocked(sourceTask, session)) {
+            return;
+        }
+        if (extraBridge != null && extraBridge.getTask() == sourceTask) {
+            armPostSessionExitGraceOnActivityLocked(extraBridge, sourceTask);
+        }
+        final ActivityRecord top = sourceTask.getTopNonFinishingActivity();
+        if (top != null && top != extraBridge) {
+            armPostSessionExitGraceOnActivityLocked(top, sourceTask);
+        }
+        if (session.sourceActivity != null && session.sourceActivity != extraBridge
+                && session.sourceActivity != top
+                && session.sourceActivity.getTask() == sourceTask) {
+            armPostSessionExitGraceOnActivityLocked(session.sourceActivity, sourceTask);
+        }
+        for (int i = mBridgeOrientations.size() - 1; i >= 0; i--) {
+            final ActivityRecord candidate = mBridgeOrientations.keyAt(i);
+            final BridgeOrientationRecord record = mBridgeOrientations.valueAt(i);
+            if (candidate != extraBridge && candidate != top
+                    && candidate != session.sourceActivity
+                    && candidate.getTask() == sourceTask
+                    && record.mode != MomentAppJumpBridgePolicy.ProtectionMode.NONE) {
+                armPostSessionExitGraceOnActivityLocked(candidate, sourceTask);
+            }
+        }
+    }
+
+    private void armPostSessionExitGraceOnActivityLocked(@NonNull ActivityRecord activity,
+            @NonNull Task sourceTask) {
+        if (!isBridgePackageEnabledLocked(activity) || activity.getTask() != sourceTask) {
+            return;
+        }
+        final int rawOrientation = activity.getRawOverrideOrientationLocked();
+        if (MomentAppJumpBridgePolicy.isFixedOrientationLandscape(rawOrientation)
+                || !hasLandscapeDefiningActivityBelowLocked(
+                        activity, sourceTask, true /* phaseA */)) {
+            return;
+        }
+        final long now = SystemClock.uptimeMillis();
+        final boolean shouldOverrideNow =
+                MomentAppJumpBridgePolicy.shouldProtectCandidateOrientation(
+                        rawOrientation, activity.providesOrientation());
+        BridgeOrientationRecord record = mBridgeOrientations.get(activity);
+        if (record == null) {
+            record = new BridgeOrientationRecord(
+                    MomentAppJumpBridgePolicy.ProtectionMode.TIER1_BEHIND, 0 /* phaseBDeadline */);
+            mBridgeOrientations.put(activity, record);
+        } else if (shouldOverrideNow) {
+            record.mode = MomentAppJumpBridgePolicy.ProtectionMode.TIER1_BEHIND;
+        }
+        record.phaseBDeadlineUptimeMs = 0;
+        record.exitGraceDeadlineUptimeMs = now + MomentAppJumpBridgePolicy.POST_SESSION_EXIT_GRACE_MS;
+        if (shouldOverrideNow) {
+            record.orientationOverridden = true;
+        }
+        scheduleBridgeTimeoutLocked(activity, record,
+                MomentAppJumpBridgePolicy.POST_SESSION_EXIT_GRACE_MS);
+    }
+
+    private void scheduleBridgeTimeoutLocked(@NonNull ActivityRecord activity,
+            @NonNull BridgeOrientationRecord record, long delayMs) {
+        if (record.timeoutRunnable != null) {
+            mService.mH.removeCallbacks(record.timeoutRunnable);
+            record.timeoutRunnable = null;
+        }
+        final Runnable timeout = new Runnable() {
+            @Override
+            public void run() {
+                synchronized (mService.mGlobalLock) {
+                    onBridgeOrientationTimeoutLocked(activity, record, this);
+                }
+            }
+        };
+        record.timeoutRunnable = timeout;
+        mService.mH.postDelayed(timeout, Math.max(1L, delayMs));
+    }
+
+    private void onBridgeOrientationTimeoutLocked(@NonNull ActivityRecord activity,
+            @NonNull BridgeOrientationRecord record, @NonNull Runnable self) {
+        if (record.timeoutRunnable != self || mBridgeOrientations.get(activity) != record) {
+            return;
+        }
+        record.timeoutRunnable = null;
+        if (activity.finishing || !activity.isAttached()) {
+            mBridgeOrientations.remove(activity);
+            return;
+        }
+        final Task task = activity.getTask();
+        if (hasActivePhaseASessionForTaskLocked(task)) {
+            record.phaseBDeadlineUptimeMs = 0;
+            return;
+        }
+        final long now = SystemClock.uptimeMillis();
+        final boolean exitGrace = record.exitGraceDeadlineUptimeMs > 0;
+        final DisplayContent dc = activity.getDisplayContent();
+        if (!exitGrace && dc != null && isChooserVisibleOnDisplayLocked(dc)) {
+            record.phaseBDeadlineUptimeMs = now + MomentAppJumpBridgePolicy.PHASE_B_TIER1_TIMEOUT_MS;
+            scheduleBridgeTimeoutLocked(activity, record,
+                    MomentAppJumpBridgePolicy.PHASE_B_TIER1_TIMEOUT_MS);
+            return;
+        }
+        final long nextDeadline = Math.max(record.phaseBDeadlineUptimeMs,
+                record.exitGraceDeadlineUptimeMs);
+        if (nextDeadline > now) {
+            scheduleBridgeTimeoutLocked(activity, record, nextDeadline - now);
+            return;
+        }
+        mBridgeOrientations.remove(activity);
+        if (!record.orientationOverridden && !record.rotationHeld) {
+            return;
+        }
+        restoreOrientationForExpiredBridgeLocked(activity);
+    }
+
+    private void restoreOrientationForExpiredBridgeLocked(@Nullable ActivityRecord activity) {
+        if (activity == null || activity.finishing || !activity.isAttached()) {
+            return;
+        }
+        activity.clearAppCompatSizeCompatForBridgeLocked();
+        final DisplayContent dc = activity.getDisplayContent();
+        if (dc == null) {
+            return;
+        }
+        if (dc.isFixedRotationLaunchingApp(activity)) {
+            if (!activity.hasAnimatingFixedRotationTransition() && !activity.inTransition()) {
+                dc.continueUpdateOrientationForDiffOrienLaunchingApp();
+            }
+            return;
+        }
+        if (!dc.onDescendantOrientationChanged(activity) && activity.getParent() != null
+                && activity.getConfiguration().orientation
+                        != activity.getRequestedConfigurationOrientation(false /* forDisplay */)) {
+            activity.onConfigurationChanged(activity.getParent().getConfiguration());
+        }
+        activity.ensureActivityConfiguration();
+    }
+
+    private static boolean isChooserVisibleOnDisplayLocked(@NonNull DisplayContent dc) {
+        return dc.getActivity(activity -> activity.isVisibleRequested()
+                && activity.isResolverOrDelegateActivity()) != null;
+    }
+
+    private void clearBridgeOrientationLocked(@Nullable ActivityRecord activity) {
+        if (activity == null) {
+            return;
+        }
+        final BridgeOrientationRecord record = mBridgeOrientations.remove(activity);
+        if (record != null && record.timeoutRunnable != null) {
+            mService.mH.removeCallbacks(record.timeoutRunnable);
+            record.timeoutRunnable = null;
+        }
+    }
+
+    private void clearBridgeOrientationsForTaskLocked(@Nullable Task task) {
+        if (task == null) {
+            return;
+        }
+        for (int i = mBridgeOrientations.size() - 1; i >= 0; i--) {
+            final ActivityRecord activity = mBridgeOrientations.keyAt(i);
+            if (activity.getTask() == task) {
+                final BridgeOrientationRecord record = mBridgeOrientations.removeAt(i);
+                if (record.timeoutRunnable != null) {
+                    mService.mH.removeCallbacks(record.timeoutRunnable);
+                    record.timeoutRunnable = null;
+                }
+            }
+        }
+    }
+
+    private void clearBridgeOrientationsLocked() {
+        for (int i = mBridgeOrientations.size() - 1; i >= 0; i--) {
+            final BridgeOrientationRecord record = mBridgeOrientations.valueAt(i);
+            if (record.timeoutRunnable != null) {
+                mService.mH.removeCallbacks(record.timeoutRunnable);
+                record.timeoutRunnable = null;
+            }
+        }
+        mBridgeOrientations.clear();
+    }
+
+    private void dismissAppJumpTaskLocked(AppJumpSession session) {
+        if (mAppJumpSessions.get(session.task.mTaskId) != session || session.dismissRequested) {
+            return;
+        }
+        session.dismissRequested = true;
+        finishAppJumpWhenReadyLocked(session, SystemClock.uptimeMillis()
+                + OPEN_REVEAL_TIMEOUT_MS);
+    }
+
+    private void finishAppJumpWhenReadyLocked(AppJumpSession session, long deadline) {
+        final Task task = session.task;
+        if (mAppJumpSessions.get(task.mTaskId) != session || !task.isAttached()
+                || task.getWindowingMode() != WINDOWING_MODE_MOMENT) {
+            return;
+        }
+        if (!session.dismissRequested) {
+            return;
+        }
+        if (!session.handoff.hasReturnedToSource()
+                && session.handoff.hasFlowActivity(task.getTopNonFinishingActivity())) {
+            cancelAppJumpDismissLocked(session);
+            return;
+        }
+        final MomentTaskSurfaceState state = getOrCreateStateLocked(task);
+        if ((state.isOpening() || state.isTransformAnimating())
+                && SystemClock.uptimeMillis() < deadline) {
+            mService.mH.postDelayed(() -> {
+                synchronized (mService.mGlobalLock) {
+                    finishAppJumpWhenReadyLocked(session, deadline);
+                }
+            }, 16);
+        } else if (state.isMomentCompact() || state.isOpening() || state.isTransformAnimating()) {
+            closeMomentTaskLocked(task);
+        } else {
+            startMomentCloseAnimationLocked(task, state);
+        }
     }
 
     boolean shouldSuppressRelaunchForConversion(ActivityRecord activity) {
@@ -412,6 +1528,21 @@ final class MomentController {
     void onTaskRemoved(Task task) {
         synchronized (mService.mGlobalLock) {
             if (task != null) {
+                final AppJumpSession removed = mAppJumpSessions.remove(task.mTaskId);
+                if (removed != null) {
+                    removed.handoff.finish();
+                    if (removed.sourceTask != task) {
+                        armPostSessionExitGraceForSessionLocked(removed, null /* extraBridge */);
+                    }
+                }
+                for (int i = mAppJumpSessions.size() - 1; i >= 0; i--) {
+                    if (mAppJumpSessions.valueAt(i).sourceTask == task) {
+                        final AppJumpSession session = mAppJumpSessions.valueAt(i);
+                        mAppJumpSessions.removeAt(i);
+                        releaseAppJumpSessionLocked(session);
+                    }
+                }
+                clearBridgeOrientationsForTaskLocked(task);
                 removeLayoutSnapshotLocked(task.mTaskId);
             }
             removeHandleWindowLocked(task);
@@ -430,6 +1561,7 @@ final class MomentController {
             if (task == null) {
                 return;
             }
+            stopAppJumpWindowOwnershipLocked(task);
             removeHandleWindowLocked(task);
             final MomentTaskSurfaceState state = mStates.remove(task.mTaskId);
             if (state == null) {
@@ -1377,6 +2509,25 @@ final class MomentController {
     }
 
     private void closeMomentTaskLocked(Task task) {
+        final AppJumpSession currentSession = mAppJumpSessions.get(task.mTaskId);
+        if (currentSession != null && currentSession.dismissRequested
+                && !currentSession.handoff.hasReturnedToSource()
+                && currentSession.handoff.hasFlowActivity(task.getTopNonFinishingActivity())) {
+            cancelAppJumpDismissLocked(currentSession);
+            return;
+        }
+        final AppJumpSession session = mAppJumpSessions.remove(task.mTaskId);
+        if (session != null) {
+            session.handoff.finish();
+            armPostSessionExitGraceForSessionLocked(session, null /* extraBridge */);
+        }
+        if (session != null && session.dismissRequested && session.wasExistingTask
+                && task.hasChild()) {
+            // Restore the user's existing task only after the Moment close morph has finished.
+            exitMomentTaskLocked(task, false /* captureSnapshot */);
+            task.moveTaskToBack(task);
+            return;
+        }
         removeLayoutSnapshotLocked(task.mTaskId);
         removeHandleWindowLocked(task);
         final MomentTaskSurfaceState state = mStates.get(task.mTaskId);
@@ -1385,6 +2536,9 @@ final class MomentController {
             state.prepareForTaskRemoval(task.getSyncTransaction());
         }
         mService.mAtmService.removeTask(task, "close-moment");
+        if (task.isAttached() && !task.hasChild()) {
+            task.removeIfPossible("close-empty-moment");
+        }
     }
 
     private int getDisplayBottomLocked(Task task) {
@@ -1436,8 +2590,16 @@ final class MomentController {
     }
 
     private void exitMomentTaskLocked(Task task) {
+        exitMomentTaskLocked(task, true /* captureSnapshot */);
+    }
+
+    private void exitMomentTaskLocked(Task task, boolean captureSnapshot) {
+        stopAppJumpWindowOwnershipLocked(task);
+        if (!captureSnapshot) {
+            removeLayoutSnapshotLocked(task.mTaskId);
+        }
         final MomentTaskSurfaceState currentState = getStateLocked(task);
-        if (currentState != null && currentState.hasFixedAspectRatio()
+        if (captureSnapshot && currentState != null && currentState.hasFixedAspectRatio()
                 && !mLayoutSnapshots.containsKey(task.mTaskId)) {
             captureLayoutSnapshotLocked(task, currentState.getContentCrop());
         }

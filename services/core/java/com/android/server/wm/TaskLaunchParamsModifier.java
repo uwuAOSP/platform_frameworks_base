@@ -154,7 +154,8 @@ class TaskLaunchParamsModifier extends DefaultLaunchParamsModifier {
         // source is a freeform window in a fullscreen display launching an activity on the same
         // display.
         if (launchMode == WINDOWING_MODE_UNDEFINED
-                && canInheritWindowingModeFromSource(display, suggestedDisplayArea, source, task)) {
+                && canInheritWindowingModeFromSource(
+                        display, suggestedDisplayArea, source, task, activity)) {
             // The source's windowing mode may be different from its task, e.g. activity is set
             // to fullscreen and its task is pinned windowing mode when the activity is entering
             // pip.
@@ -434,7 +435,7 @@ class TaskLaunchParamsModifier extends DefaultLaunchParamsModifier {
      */
     private boolean canInheritWindowingModeFromSource(@NonNull DisplayContent display,
             TaskDisplayArea suggestedDisplayArea, @Nullable ActivityRecord source,
-            @Nullable Task targetTask) {
+            @Nullable Task targetTask, @NonNull ActivityRecord activity) {
         if (source == null || source.getTask() == null) {
             return false;
         }
@@ -449,6 +450,10 @@ class TaskLaunchParamsModifier extends DefaultLaunchParamsModifier {
         // Only fullscreen, freeform, and Moment sources are allowed to inherit their windowing
         // mode.
         final int sourceWindowingMode = source.getTask().getWindowingMode();
+        if (sourceWindowingMode == WINDOWING_MODE_MOMENT
+                && !source.packageName.equals(activity.packageName)) {
+            return false;
+        }
         if (sourceWindowingMode != WINDOWING_MODE_FULLSCREEN
                 && sourceWindowingMode != WINDOWING_MODE_FREEFORM
                 && sourceWindowingMode != WINDOWING_MODE_MOMENT) {

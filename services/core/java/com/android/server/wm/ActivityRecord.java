@@ -3523,6 +3523,10 @@ final class ActivityRecord extends WindowToken {
      */
     private void finishActivityResults(int resultCode, Intent resultData,
             NeededUriGrants resultGrants) {
+        if (mWmService.mMomentController.deferAppJumpCanceledResultLocked(
+                this, resultCode, resultData)) {
+            resultTo = null;
+        }
         // Send the result if needed
         if (resultTo != null) {
             if (DEBUG_RESULTS) {
@@ -4092,6 +4096,7 @@ final class ActivityRecord extends WindowToken {
             return;
         }
         finishing = true;
+        mWmService.mMomentController.onAppJumpActivityFinishingLocked(this);
 
         // Clear the lock task if needed when the task ends.
         if (task != null && task.getTopNonFinishingActivity() == null
@@ -4443,6 +4448,9 @@ final class ActivityRecord extends WindowToken {
         mWmService.mSnapshotController.onAppRemoved(this);
         mAtmService.mStartingProcessActivities.remove(this);
         mTaskSupervisor.onActivityRemovedFromDisplay(this);
+        if (mWmService != null && mWmService.mMomentController != null) {
+            mWmService.mMomentController.onAppJumpActivityRemovedLocked(this);
+        }
 
         mAppCompatController.getLetterboxPolicy().stop();
         mAppCompatController.getTransparentPolicy().stop();
@@ -6341,7 +6349,9 @@ final class ActivityRecord extends WindowToken {
         mTaskSupervisor.mStoppingActivities.remove(this);
         if (getDisplayArea().allResumedActivitiesComplete()) {
             // Construct the compat environment at a relatively stable state if needed.
-            mAppCompatController.getSizeCompatModePolicy().updateAppCompatDisplayInsets();
+            if (!isMomentBridgeOrientationProtectedLocked()) {
+                mAppCompatController.getSizeCompatModePolicy().updateAppCompatDisplayInsets();
+            }
             mRootWindowContainer.executeAppTransitionForAllDisplay();
         }
 
@@ -7538,18 +7548,67 @@ final class ActivityRecord extends WindowToken {
     }
 
     /**
-     * Returns the app's preferred orientation regardless of its current visibility state taking
-     * into account orientation per-app overrides applied by the device manufacturers.
+     * Returns the app's orientation preference after AppCompat overrides, before any temporary
+     * Moment AppJump bridge protection override.
      */
-    @Override
     @ActivityInfo.ScreenOrientation
-    protected int getOverrideOrientation() {
+    int getRawOverrideOrientationLocked() {
         int candidateOrientation = super.getOverrideOrientation();
         if (isRestrictedFixedOrientation(candidateOrientation)) {
             candidateOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
         }
         return mAppCompatController.getOrientationPolicy()
                 .overrideOrientationIfNeeded(candidateOrientation);
+    }
+
+    /**
+     * Returns the app's preferred orientation regardless of its current visibility state taking
+     * into account orientation per-app overrides applied by the device manufacturers.
+     */
+    @Override
+    @ActivityInfo.ScreenOrientation
+    protected int getOverrideOrientation() {
+        final int candidateOrientation = getRawOverrideOrientationLocked();
+        if (mWmService != null && mWmService.mMomentController != null) {
+            return mWmService.mMomentController.overrideAppJumpBridgeOrientationLocked(
+                    this, candidateOrientation);
+        }
+        return candidateOrientation;
+    }
+
+    @Override
+    boolean shouldSkipSetOrientation(@ActivityInfo.ScreenOrientation int requestedOrientation) {
+        if (!super.shouldSkipSetOrientation(requestedOrientation)) {
+            return false;
+        }
+        // When MomentController temporarily overrides getOverrideOrientation() (e.g. to
+        // SCREEN_ORIENTATION_BEHIND), allow Java setRequestedOrientation() matching that override
+        // to still persist into mOverrideOrientation rather than short-circuiting.
+        if (mWmService != null && mWmService.mMomentController != null
+                && super.getOverrideOrientation() != requestedOrientation) {
+            final int rawOrientation = getRawOverrideOrientationLocked();
+            if (mWmService.mMomentController.overrideAppJumpBridgeOrientationLocked(
+                    this, rawOrientation) != rawOrientation) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isMomentBridgeOrientationProtectedLocked() {
+        if (mWmService == null || mWmService.mMomentController == null) {
+            return false;
+        }
+        if (mWmService.mMomentController.shouldHoldBridgeRotationLocked(this)) {
+            return true;
+        }
+        final int rawOrientation = getRawOverrideOrientationLocked();
+        return mWmService.mMomentController.overrideAppJumpBridgeOrientationLocked(
+                this, rawOrientation) != rawOrientation;
+    }
+
+    void clearAppCompatSizeCompatForBridgeLocked() {
+        mAppCompatController.getSizeCompatModePolicy().clearSizeCompatModeAttributes();
     }
 
     /**
@@ -7609,6 +7668,9 @@ final class ActivityRecord extends WindowToken {
      *         aspect ratio.
      */
     boolean shouldCreateAppCompatDisplayInsets() {
+        if (isMomentBridgeOrientationProtectedLocked()) {
+            return false;
+        }
         return mAppCompatController.getSizeCompatModePolicy().shouldCreateAppCompatDisplayInsets();
     }
 
@@ -8592,7 +8654,7 @@ final class ActivityRecord extends WindowToken {
         // don't want to save mAppCompatDisplayInsets in onConfigurationChanged without visibility
         // check to avoid remembering obsolete configuration which can lead to unnecessary
         // size-compat mode.
-        if (isVisibleRequested()) {
+        if (isVisibleRequested() && !isMomentBridgeOrientationProtectedLocked()) {
             // Calling from here rather than resolveOverrideConfiguration to ensure that this is
             // called after full config is updated in ConfigurationContainer#onConfigurationChanged.
             mAppCompatController.getSizeCompatModePolicy().updateAppCompatDisplayInsets();

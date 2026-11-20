@@ -207,6 +207,7 @@ class ActivityStarter {
     private int mCallingUid;
     private int mRealCallingUid;
     private ActivityOptions mOptions;
+    private MomentController.AppJumpLaunch mMomentAppJumpLaunch;
 
     // If the code is BAL_BLOCK, background activity can only be started in an existing task that
     // contains an activity with same uid, or if activity starts are enabled in developer options.
@@ -426,6 +427,7 @@ class ActivityStarter {
         String intentCreatorPackage;
         int startFlags;
         SafeActivityOptions activityOptions;
+        MomentController.AppJumpLaunch momentAppJumpLaunch;
         boolean ignoreTargetSecurity;
         boolean componentSpecified;
         boolean avoidMoveToFront;
@@ -523,6 +525,7 @@ class ActivityStarter {
             realCallingUid = DEFAULT_REAL_CALLING_UID;
             startFlags = 0;
             activityOptions = null;
+            momentAppJumpLaunch = null;
             ignoreTargetSecurity = false;
             componentSpecified = false;
             outActivity = null;
@@ -567,6 +570,7 @@ class ActivityStarter {
             realCallingUid = request.realCallingUid;
             startFlags = request.startFlags;
             activityOptions = request.activityOptions;
+            momentAppJumpLaunch = request.momentAppJumpLaunch;
             ignoreTargetSecurity = request.ignoreTargetSecurity;
             componentSpecified = request.componentSpecified;
             outActivity = request.outActivity;
@@ -786,6 +790,7 @@ class ActivityStarter {
         mCallingUid = starter.mCallingUid;
         mRealCallingUid = starter.mRealCallingUid;
         mOptions = starter.mOptions;
+        mMomentAppJumpLaunch = starter.mMomentAppJumpLaunch;
         mBalVerdict = starter.mBalVerdict;
 
         mLaunchTaskBehind = starter.mLaunchTaskBehind;
@@ -1560,6 +1565,17 @@ class ActivityStarter {
                 callerApp = wpc;
             }
         }
+        // Apply the rule to the final destination after permission/installer redirections.
+        // BAL, app-jump blocking and normal permission checks still precede this decision.
+        request.momentAppJumpLaunch = null;
+        if (balVerdict.allows()) {
+            request.momentAppJumpLaunch = mService.mWindowManager.mMomentController
+                    .prepareAppJumpMomentLaunchLocked(intent, aInfo, sourceRecord, callingPackage,
+                            callingUid, userId, checkedOptions, inTask, inTaskFragment);
+            if (request.momentAppJumpLaunch != null) {
+                checkedOptions = request.momentAppJumpLaunch.options;
+            }
+        }
         final ActivityRecord r = new ActivityRecord.Builder(mService)
                 .setCaller(callerApp)
                 .setLaunchedFromPid(callingPid)
@@ -1861,6 +1877,13 @@ class ActivityStarter {
                 currentRootTask != null ? currentRootTask : mTargetRootTask;
 
         if (!ActivityManager.isStartResultSuccessful(result) || startedActivityRootTask == null) {
+            if (mMomentAppJumpLaunch != null) {
+                mService.mWindowManager.mMomentController
+                        .onAppJumpLaunchFailedLocked(mMomentAppJumpLaunch);
+            } else {
+                mService.mWindowManager.mMomentController
+                        .onAppJumpBridgeActivityLaunchFailedLocked(mLastStartActivityRecord);
+            }
             // If we are not able to proceed, disassociate the activity from the task. Leaving an
             // activity in an incomplete state can lead to issues, such as performing operations
             // without a window container.
@@ -1882,6 +1905,24 @@ class ActivityStarter {
                 transition.abort();
             }
             return null;
+        }
+
+        if (mMomentAppJumpLaunch != null && (result == START_SUCCESS
+                || result == START_DELIVERED_TO_TOP || result == START_TASK_TO_FRONT)) {
+            mService.mWindowManager.mMomentController.onAppJumpLaunchSucceededLocked(
+                    mMomentAppJumpLaunch, mLastStartActivityRecord);
+        } else if (mMomentAppJumpLaunch != null) {
+            mService.mWindowManager.mMomentController
+                    .onAppJumpLaunchFailedLocked(mMomentAppJumpLaunch);
+        } else if (result != START_SUCCESS && result != START_DELIVERED_TO_TOP
+                && result != START_TASK_TO_FRONT) {
+            mService.mWindowManager.mMomentController
+                    .onAppJumpBridgeActivityLaunchFailedLocked(mLastStartActivityRecord);
+        }
+        if (result == START_SUCCESS || result == START_DELIVERED_TO_TOP
+                || result == START_TASK_TO_FRONT) {
+            mService.mWindowManager.mMomentController.onAppJumpActivityLaunchedLocked(
+                    mLastStartActivityRecord);
         }
 
         if (android.security.Flags.contentUriPermissionApis() && started.isAttached()) {
@@ -2127,6 +2168,10 @@ class ActivityStarter {
             }
         }
 
+        if (mMomentAppJumpLaunch != null) {
+            mService.mWindowManager.mMomentController.onAppJumpTaskResolvedLocked(
+                    mMomentAppJumpLaunch, targetTask);
+        }
         ensureExplicitMomentLaunchWindowingMode(targetTask);
 
         final ActivityRecord targetTaskTop = newTask
@@ -2236,6 +2281,10 @@ class ActivityStarter {
         mStartActivity.getTaskFragment().clearLastPausedActivity();
 
         final boolean isTaskSwitch = startedTask != prevTopTask;
+        if (mMomentAppJumpLaunch == null) {
+            mService.mWindowManager.mMomentController
+                    .onAppJumpCandidateActivityStartingLocked(mStartActivity);
+        }
         mTargetRootTask.startActivityLocked(mStartActivity, topRootTask, newTask, isTaskSwitch,
                 mOptions, sourceRecord);
         if (mDoResume) {
@@ -2343,6 +2392,11 @@ class ActivityStarter {
 
     /** Returns the leaf task where the target activity may be placed. */
     private Task computeTargetTask() {
+        if (mMomentAppJumpLaunch != null) {
+            // Keep even startActivityForResult out of the source task. Its resultTo remains
+            // attached to the ActivityRecord and is delivered normally when it finishes.
+            return null;
+        }
         if (mStartActivity.resultTo == null && mInTask == null && !mAddingToTask
                 && (mLaunchFlags & FLAG_ACTIVITY_NEW_TASK) != 0) {
             // A new task should be created instead of using existing one.
@@ -2644,6 +2698,9 @@ class ActivityStarter {
      * should only be launched once.
      */
     private int deliverToCurrentTopIfNeeded(Task topRootTask, NeededUriGrants intentGrants) {
+        if (mMomentAppJumpLaunch != null && mStartActivity.resultTo != null) {
+            return START_SUCCESS;
+        }
         final ActivityRecord top = topRootTask.topRunningActivity(mNotTop);
         final boolean dontStart = top != null
                 && top.mActivityComponent.equals(mStartActivity.mActivityComponent)
@@ -2826,6 +2883,7 @@ class ActivityStarter {
         mCallingUid = -1;
         mRealCallingUid = -1;
         mOptions = null;
+        mMomentAppJumpLaunch = null;
         mBalVerdict = BalVerdict.ALLOW_BY_DEFAULT;
 
         mLaunchTaskBehind = false;
@@ -2879,6 +2937,7 @@ class ActivityStarter {
         mStartActivity = r;
         mIntent = r.intent;
         mOptions = options;
+        mMomentAppJumpLaunch = mRequest.momentAppJumpLaunch;
         mCallingUid = r.launchedFromUid;
         mRealCallingUid = realCallingUid;
         mSourceRecord = sourceRecord;
@@ -2923,6 +2982,11 @@ class ActivityStarter {
             mLaunchFlags |= FLAG_ACTIVITY_NEW_TASK;
         }
 
+        if (mMomentAppJumpLaunch != null) {
+            mLaunchFlags |= FLAG_ACTIVITY_NEW_TASK;
+            mLaunchTaskBehind = false;
+            r.mLaunchTaskBehind = false;
+        }
         sendNewTaskResultRequestIfNeeded();
 
         if ((mLaunchFlags & FLAG_ACTIVITY_NEW_DOCUMENT) != 0 && r.resultTo == null) {
@@ -2940,7 +3004,8 @@ class ActivityStarter {
 
         // We'll invoke onUserLeaving before onPause only if the launching
         // activity did not explicitly state that this is an automated launch.
-        mSupervisor.mUserLeaving = (mLaunchFlags & FLAG_ACTIVITY_NO_USER_ACTION) == 0;
+        mSupervisor.mUserLeaving = mMomentAppJumpLaunch == null
+                && (mLaunchFlags & FLAG_ACTIVITY_NO_USER_ACTION) == 0;
         if (DEBUG_USER_LEAVING) Slog.v(TAG_USER_LEAVING,
                 "startActivity() => mUserLeaving=" + mSupervisor.mUserLeaving);
 
@@ -3049,6 +3114,9 @@ class ActivityStarter {
     }
 
     private void sendNewTaskResultRequestIfNeeded() {
+        if (mMomentAppJumpLaunch != null) {
+            return;
+        }
         if (mStartActivity.resultTo != null && (mLaunchFlags & FLAG_ACTIVITY_NEW_TASK) != 0) {
             // For whatever reason this activity is being launched into a new task...
             // yet the caller has requested a result back.  Well, that is pretty messed up,
@@ -3167,6 +3235,15 @@ class ActivityStarter {
      *                                  should be allowed to be reused for the new activity.
      */
     private Task resolveReusableTask(boolean includeLaunchedFromBubble) {
+        if (mMomentAppJumpLaunch != null && mMomentAppJumpLaunch.isReturnToSource()
+                && mStartActivity.resultTo == null) {
+            return mMomentAppJumpLaunch.sourceTask;
+        }
+        if (mMomentAppJumpLaunch != null && (mLaunchFlags & FLAG_ACTIVITY_CLEAR_TASK) != 0) {
+            // Adding NEW_TASK must not turn a previously inert CLEAR_TASK into destruction of
+            // the user's existing background task.
+            return null;
+        }
         // If a target task is specified, try to reuse that one
         if (mOptions != null && mOptions.getLaunchTaskId() != INVALID_TASK_ID) {
             Task launchTask = mRootWindowContainer.anyTaskForId(mOptions.getLaunchTaskId());
@@ -3230,7 +3307,13 @@ class ActivityStarter {
             intentActivity = null;
         }
 
-        return intentActivity != null ? intentActivity.getTask() : null;
+        final Task task = intentActivity != null ? intentActivity.getTask() : null;
+        if (mMomentAppJumpLaunch != null && !mMomentAppJumpLaunch.isReturnToSource()
+                && !mService.mWindowManager.mMomentController
+                        .canReuseAppJumpTaskLocked(mMomentAppJumpLaunch, task)) {
+            return null;
+        }
+        return task;
     }
 
     /**

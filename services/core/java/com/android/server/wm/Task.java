@@ -820,6 +820,9 @@ class Task extends TaskFragment {
     }
 
     void removeIfPossible(String reason) {
+        if (mWmService.mMomentController.shouldDeferEmptyAppJumpTaskRemovalLocked(this)) {
+            return;
+        }
         mAtmService.getLockTaskController().clearLockedTask(this);
         if (shouldDeferRemoval()) {
             if (DEBUG_ROOT_TASK) Slog.i(TAG,

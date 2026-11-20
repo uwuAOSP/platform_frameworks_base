@@ -514,7 +514,7 @@ class ActivityStartInterceptor {
         return isUserApp(callingAppInfo);
     }
 
-    private static boolean isAllowedSystemMediatorTarget(ActivityInfo activityInfo) {
+    static boolean isAllowedSystemMediatorTarget(ActivityInfo activityInfo) {
         final String packageName = activityInfo.packageName;
         final String className = activityInfo.name;
         if (packageName == null || className == null) {

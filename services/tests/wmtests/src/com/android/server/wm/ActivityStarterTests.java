@@ -32,6 +32,7 @@ import static android.app.ActivityManager.START_SUCCESS;
 import static android.app.ActivityManager.START_TASK_TO_FRONT;
 import static android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD;
 import static android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN;
+import static android.app.WindowConfiguration.WINDOWING_MODE_MOMENT;
 import static android.app.WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW;
 import static android.app.WindowConfiguration.WINDOWING_MODE_PINNED;
 import static android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK;
@@ -1519,6 +1520,50 @@ public final class ActivityStarterTests extends ActivityStarterTestBase {
         starter.execute();
 
         verify(recentTasks, times(1)).add(any());
+    }
+
+    @Test
+    public void testMomentAppJump_keepsSourceTaskFullscreen() {
+        verifyMomentAppJumpTaskIsolation(false /* forResult */);
+    }
+
+    @Test
+    public void testMomentAppJump_preservesCrossTaskActivityResult() {
+        verifyMomentAppJumpTaskIsolation(true /* forResult */);
+    }
+
+    private void verifyMomentAppJumpTaskIsolation(boolean forResult) {
+        final ActivityStarter starter = prepareStarter(0, false);
+        final ActivityRecord source = new ActivityBuilder(mAtm).setCreateTask(true)
+                .setVisible(true).setComponent(new ComponentName("com.test.game", ".Game"))
+                .build();
+        source.getTask().setWindowingMode(WINDOWING_MODE_FULLSCREEN);
+        final ActivityRecord target = new ActivityBuilder(mAtm)
+                .setComponent(new ComponentName("com.test.share", ".Share")).build();
+        if (forResult) {
+            target.resultTo = source;
+            target.resultWho = "share";
+            target.requestCode = 42;
+        }
+        final ActivityOptions options = ActivityOptions.makeBasic();
+        options.setLaunchWindowingMode(WINDOWING_MODE_MOMENT);
+        starter.mRequest.momentAppJumpLaunch = new MomentController.AppJumpLaunch(
+                source.getTask(), source.packageName, target.packageName, options, null);
+
+        startActivityInner(starter, target, source, options, null, null);
+
+        assertNotNull(target.getTask());
+        assertNotEquals(source.getTask(), target.getTask());
+        assertEquals(WINDOWING_MODE_FULLSCREEN, source.getTask().getWindowingMode());
+        assertEquals(WINDOWING_MODE_MOMENT, target.getTask().getWindowingMode());
+        assertTrue((target.intent.getFlags() & FLAG_ACTIVITY_NEW_TASK) != 0);
+        if (forResult) {
+            assertEquals(source, target.resultTo);
+            assertEquals("share", target.resultWho);
+            assertEquals(42, target.requestCode);
+        }
+        starter.reset(true);
+        assertNull(starter.mRequest.momentAppJumpLaunch);
     }
 
     @Test

@@ -20,6 +20,7 @@ import static android.app.WindowConfiguration.ACTIVITY_TYPE_HOME;
 import static android.app.WindowConfiguration.ACTIVITY_TYPE_STANDARD;
 import static android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM;
 import static android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN;
+import static android.app.WindowConfiguration.WINDOWING_MODE_MOMENT;
 import static android.app.WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW;
 import static android.app.WindowConfiguration.WINDOWING_MODE_PINNED;
 import static android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED;
@@ -42,6 +43,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import android.app.ActivityOptions;
+import android.content.ComponentName;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
 import android.content.res.Configuration;
@@ -681,6 +683,32 @@ public class TaskLaunchParamsModifierTests extends
         assertEquivalentWindowingMode(WINDOWING_MODE_FREEFORM, mResult.mWindowingMode,
                 WINDOWING_MODE_FULLSCREEN);
         assertFalse(mResult.mIsTaskMoveDisallowed);
+    }
+
+    @Test
+    public void testMomentModeIsNotInheritedAcrossPackages() {
+        final TestDisplayContent display = createNewDisplayContent(WINDOWING_MODE_FULLSCREEN);
+        final ActivityRecord source = createSourceActivity(display);
+        source.getTask().setWindowingMode(WINDOWING_MODE_MOMENT);
+        mActivity = new ActivityBuilder(mAtm)
+                .setComponent(new ComponentName("com.other.app", "com.other.app.Callback"))
+                .build();
+
+        assertEquals(RESULT_CONTINUE,
+                new CalculateRequestBuilder().setSource(source).calculate());
+        assertEquivalentWindowingMode(WINDOWING_MODE_FULLSCREEN, mResult.mWindowingMode,
+                WINDOWING_MODE_FULLSCREEN);
+    }
+
+    @Test
+    public void testMomentModeIsInheritedWithinSamePackage() {
+        final TestDisplayContent display = createNewDisplayContent(WINDOWING_MODE_FULLSCREEN);
+        final ActivityRecord source = createSourceActivity(display);
+        source.getTask().setWindowingMode(WINDOWING_MODE_MOMENT);
+
+        assertEquals(RESULT_CONTINUE,
+                new CalculateRequestBuilder().setSource(source).calculate());
+        assertEquals(WINDOWING_MODE_MOMENT, mResult.mWindowingMode);
     }
 
     @Test

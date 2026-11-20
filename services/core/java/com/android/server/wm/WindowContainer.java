@@ -1532,7 +1532,7 @@ class WindowContainer<E extends WindowContainer> extends ConfigurationContainer<
     @ScreenOrientation
     int setOrientation(@ScreenOrientation int requestedOrientation,
             @Nullable WindowContainer requestingContainer) {
-        if (getOverrideOrientation() == requestedOrientation) {
+        if (shouldSkipSetOrientation(requestedOrientation)) {
             return requestedOrientation;
         }
         setOverrideOrientation(requestedOrientation);
@@ -1636,6 +1636,10 @@ class WindowContainer<E extends WindowContainer> extends ConfigurationContainer<
 
     protected void setOverrideOrientation(@ScreenOrientation int orientation) {
         mOverrideOrientation = orientation;
+    }
+
+    boolean shouldSkipSetOrientation(@ScreenOrientation int requestedOrientation) {
+        return getOverrideOrientation() == requestedOrientation;
     }
 
     /**
